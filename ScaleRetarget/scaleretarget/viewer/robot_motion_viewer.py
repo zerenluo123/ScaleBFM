@@ -8,6 +8,7 @@ from loop_rate_limiters import RateLimiter
 import numpy as np
 from rich import print
 from loguru import logger
+from scaleretarget.utils.robot_base import RobotBase
 
 def draw_frame(
     pos,
@@ -60,6 +61,7 @@ class RobotMotionViewer:
         self.xml_path = robot_config.robot_xml_path
         self.model = mj.MjModel.from_xml_path(str(self.xml_path))
         self.data = mj.MjData(self.model)
+        self.base = RobotBase(self.model)
         self.robot_base = robot_config.robot_base
         self.viewer_cam_distance = robot_config.viewer_cam_dist
         mj.mj_step(self.model, self.data)
@@ -122,9 +124,7 @@ class RobotMotionViewer:
         else, the motion will be visualized as fast as possible.
         """
         
-        self.data.qpos[:3] = root_pos
-        self.data.qpos[3:7] = root_rot # quat need to be scalar first! for mujoco
-        self.data.qpos[7:] = dof_pos
+        self.base.merge_qpos(self.data.qpos, root_pos, root_rot, dof_pos) # quat need to be scalar first! for mujoco
         
         mj.mj_forward(self.model, self.data)
         

@@ -1,0 +1,37 @@
+# @package _global_
+
+robot:
+  robot_type: unitree_g1d
+
+  robot_xml_path: assets/unitree_g1d/g1d_mocap.xml
+
+  robot_base: torso_link
+
+  viewer_cam_dist: 2.5
+
+  # The whole human is shifted vertically so the root height follows a low-passed, speed-limited
+  # curve the lift can track. max_speed is the column limit in unitree_sdk2 (AgvClient::HeightAdjust,
+  # 76.5 mm/s); the URDF allows 0.05 m/s per stage and the product page says about 60 mm/s.
+  root_height_filter:
+    cutoff_hz: 2.0
+    max_speed: 0.0765
+
+  # The chassis is a differential drive. Like the lift, the whole human is moved: shifted horizontally
+  # so the root follows a 1 Hz low-passed path that keeps only the motion along the smoothed pelvis
+  # direction, and turned about the root so it faces a heading that changes no faster than
+  # max_turn_rate. Limits are from unitree_sdk2 (AgvClient::Move: 1.5 m/s, 0.6 rad/s, no lateral velocity).
+  base_path_filter:
+    cutoff_hz: 1.0
+    max_speed: 1.5
+    max_turn_rate: 0.6
+
+  # Hard per-frame bound on the summed lift motion in the IK; without it the solver still uses the
+  # lift to reach hand targets (e.g. arms overhead) even when the root target is smooth.
+  lift_speed_limit:
+    joints: [LZ_mt_Joint, LZ_it_Joint]
+    max_speed: ${robot.root_height_filter.max_speed}
+
+  # The same hard bound on the chassis yaw, which the solver otherwise turns faster to reach hands.
+  turn_speed_limit:
+    joints: [base_yaw_joint]
+    max_speed: ${robot.base_path_filter.max_turn_rate}

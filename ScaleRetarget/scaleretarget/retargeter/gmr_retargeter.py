@@ -7,6 +7,12 @@ from loguru import logger
 from rich.progress import track
 from scipy.spatial.transform import Rotation as R
 from scaleretarget.retargeter.base_retargeter import BaseRetargeter
+from scaleretarget.utils.robot_base import RobotBase
+from scaleretarget.utils.root_height_filter import filter_root_height
+from scaleretarget.utils.base_path_filter import filter_base_path
+from scaleretarget.utils.frame_step_limit import FrameStepLimit
+from scaleretarget.utils.joint_comfort_task import JointComfortTask
+from scaleretarget.utils.frame_smooth_task import FrameSmoothTask
 
 
 class GmrRetargeter(BaseRetargeter):
@@ -16,6 +22,8 @@ class GmrRetargeter(BaseRetargeter):
         self.xml_file = self.config.robot.robot_xml_path
         logger.debug(f"[Retargeter] Loading robot model from {self.xml_file}")
         self.model = mj.MjModel.from_xml_path(self.xml_file)
+        self.base = RobotBase(self.model)
+        logger.debug(f"[Retargeter] Robot base type: {self.base.type}")
 
         logger.debug(f"[Retargeter] Robot Degrees of Freedom names and their order:")
         self.robot_dof_names = {}
@@ -41,6 +49,7 @@ class GmrRetargeter(BaseRetargeter):
         ik_config = self.config.ik_config
         ik_config = OmegaConf.load(ik_config)
         logger.debug(f"[Retargeter] Using IK config: {ik_config}")
+        self.ik_config = ik_config
 
         self.human_height_assumption = ik_config['human_height_assumption']
         self.human_root_name = ik_config["human_root_name"]
@@ -57,6 +66,17 @@ class GmrRetargeter(BaseRetargeter):
 
         self.solver = self.config.solver
         self.damping = self.config.damping
+
+        # Optional per-robot solver settings. A null tolerance runs all max_iter QP steps every frame:
+        # stopping on the unweighted error norm leaves the IK short of convergence, and the lag
+        # accumulates into the wrong arm branch (e.g. abducting instead of raising the arms forward).
+        ik_solver = ik_config.get("ik_solver", {})
+        self.max_iter = ik_solver.get("max_iter", self.max_iter)
+        self.damping = ik_solver.get("damping", self.damping)
+        self.tolerance = ik_solver.get("tolerance", 0.001)
+        self.lm_damping = ik_solver.get("lm_damping", 1.0)
+        if ik_solver:
+            logger.info(f"[Retargeter] IK solver: {dict(ik_solver)}")
 
         self.human_body_to_task = {}
         self.pos_offsets = {}
@@ -77,6 +97,21 @@ class GmrRetargeter(BaseRetargeter):
         self._setup_retarget_configuration()
         
         self.ground_offset = 0.0
+        self.show_progress = True
+
+        self.root_height_filter = self.config.robot.get("root_height_filter", None)
+        if self.root_height_filter is not None:
+            logger.info(f"[Retargeter] Root height filter: {dict(self.root_height_filter)}")
+
+        self.base_path_filter = self.config.robot.get("base_path_filter", None)
+        if self.base_path_filter is not None:
+            logger.info(f"[Retargeter] Base path filter: {dict(self.base_path_filter)}")
+
+        self.speed_limits = {key: self.config.robot[key] for key in ("lift_speed_limit", "turn_speed_limit")
+                             if self.config.robot.get(key, None) is not None}
+        self.step_limits = []
+        for key, limit in self.speed_limits.items():
+            logger.info(f"[Retargeter] {key}: {dict(limit)}")
 
     def _setup_retarget_configuration(self):
         self.configuration = mink.Configuration(self.model)
@@ -91,7 +126,7 @@ class GmrRetargeter(BaseRetargeter):
                     frame_type="body",
                     position_cost=pos_weight,
                     orientation_cost=rot_weight,
-                    lm_damping=1,
+                    lm_damping=self.lm_damping,
                 )
                 if body_name in self.human_body_to_task:
                     self.human_body_to_task[body_name].append(task)
@@ -106,6 +141,20 @@ class GmrRetargeter(BaseRetargeter):
                 )
                 self.tasks.append(task)
                 self.task_errors[task] = []    
+
+        joint_comfort = self.ik_config.get("joint_comfort", None)
+        if joint_comfort is not None:
+            logger.info(f"[Retargeter] Joint comfort task: weight {joint_comfort.weight}, offset {joint_comfort.offset}")
+            joints = {name: list(entry) for name, entry in joint_comfort.joints.items()}
+            self.tasks.append(JointComfortTask(self.model, joints, joint_comfort.weight, joint_comfort.offset))
+
+        frame_smooth = self.ik_config.get("frame_smooth", None)
+        self.frame_smooth_task = None
+        if frame_smooth is not None:
+            logger.info(f"[Retargeter] Frame smooth task: weight {frame_smooth.weight}, threshold {frame_smooth.threshold}")
+            self.frame_smooth_task = FrameSmoothTask(
+                self.model, list(frame_smooth.joints), frame_smooth.weight, frame_smooth.threshold)
+            self.tasks.append(self.frame_smooth_task)
 
         # self.damping_task = mink.DampingTask(self.model,cost=5.0) 
 
@@ -140,10 +189,40 @@ class GmrRetargeter(BaseRetargeter):
             for key in self.human_scale_table_orig.keys():
                 self.human_scale_table[key] = self.human_scale_table_orig[key] * ratio
 
+    def prepare_frames(self, frames):
+        if self.root_height_filter is not None:
+            frames = filter_root_height(
+                frames,
+                self.human_root_name,
+                self.motion_fps,
+                self.root_height_filter.cutoff_hz,
+                self.root_height_filter.max_speed,
+            )
+        if self.base_path_filter is not None:
+            frames = filter_base_path(
+                frames,
+                self.human_root_name,
+                self.rot_offsets[self.human_root_name],
+                self.motion_fps,
+                self.base_path_filter.cutoff_hz,
+                self.base_path_filter.max_speed,
+                self.base_path_filter.get("max_turn_rate", None),
+            )
+        self.init_frame_height = frames[0][self.human_root_name][0][2]
+        return frames
+
+    def compute_targets(self, frames):
+        """The per-frame IK targets that retarget() would track, without solving the IK."""
+        targets = []
+        for frame in self.prepare_frames(frames):
+            self.update_targets(frame)
+            targets.append(self.scaled_human_data)
+        return targets
+
     def retarget(self, frames):
         qpos_list = []
 
-        self.init_frame_height = frames[0][self.human_root_name][0][2]
+        frames = self.prepare_frames(frames)
 
         init_human_data = frames[0]
         init_human_data = self.to_numpy(init_human_data)
@@ -152,18 +231,31 @@ class GmrRetargeter(BaseRetargeter):
         init_human_data = self.apply_ground_offset(init_human_data)
 
         init_qpos = np.zeros_like(self.configuration.data.qpos)
-        init_qpos[:3] = init_human_data[self.human_root_name][0]
-        init_qpos[3:7] = init_human_data[self.human_root_name][1]
+        self.base.root_to_qpos(
+            init_qpos,
+            init_human_data[self.human_root_name][0],
+            init_human_data[self.human_root_name][1],
+        )
         self.configuration.update(q=init_qpos)
 
-        for frame_idx in track(range(len(frames)), total=len(frames)):
+        self.step_limits = [FrameStepLimit(self.model, list(limit.joints), limit.max_speed / self.motion_fps)
+                            for limit in self.speed_limits.values()]
+        ik_limits = [*self.ik_limits, *self.step_limits]
+
+        for frame_idx in track(range(len(frames)), total=len(frames), disable=not self.show_progress):
             frame = frames[frame_idx]
-            qpos = self.retarget_frame(frame)
+            for step_limit in self.step_limits:
+                # The first frame converges from the initial guess, so it is left unconstrained.
+                step_limit.set_anchor(self.configuration.q if frame_idx > 0 else None)
+            if self.frame_smooth_task is not None:
+                self.frame_smooth_task.set_anchor(self.configuration.q if frame_idx > 0 else None)
+            qpos = self.retarget_frame(frame, ik_limits=ik_limits)
             if self.enable_viewer:
+                root_pos, root_rot, dof_pos = self.base.split_qpos(qpos)
                 self.viewer.step(
-                    root_pos=qpos[:3],
-                    root_rot=qpos[3:7],
-                    dof_pos=qpos[7:],
+                    root_pos=root_pos,
+                    root_rot=root_rot,
+                    dof_pos=dof_pos,
                     human_motion_data=self.scaled_human_data,
                 )
             qpos_list.append(qpos.copy())
@@ -190,19 +282,21 @@ class GmrRetargeter(BaseRetargeter):
                 task.set_target(mink.SE3.from_rotation_and_translation(mink.SO3(rot), pos))
             
             
-    def retarget_frame(self, human_data, offset_to_ground=False):
+    def retarget_frame(self, human_data, offset_to_ground=False, ik_limits=None):
+        if ik_limits is None:
+            ik_limits = self.ik_limits
         # Update the task targets
         self.update_targets(human_data, offset_to_ground)
 
         curr_error = self.error()
         dt = self.configuration.model.opt.timestep
         vel = mink.solve_ik(
-            self.configuration, self.tasks, dt, self.solver, self.damping, self.ik_limits
+            self.configuration, self.tasks, dt, self.solver, self.damping, limits=ik_limits
         )
         self.configuration.integrate_inplace(vel, dt)
         next_error = self.error()
         num_iter = 0
-        while curr_error - next_error > 0.001 and num_iter < self.max_iter:
+        while (self.tolerance is None or curr_error - next_error > self.tolerance) and num_iter < self.max_iter:
             curr_error = next_error
             # Solve the IK problem with the second task
             dt = self.configuration.model.opt.timestep
@@ -211,7 +305,7 @@ class GmrRetargeter(BaseRetargeter):
             #         self.configuration, [*self.tasks, self.damping_task], dt, self.solver, self.damping, self.ik_limits
             #     )
             vel = mink.solve_ik(
-                self.configuration, self.tasks, dt, self.solver, self.damping, self.ik_limits
+                self.configuration, self.tasks, dt, self.solver, self.damping, limits=ik_limits
             )
             self.configuration.integrate_inplace(vel, dt)
                 

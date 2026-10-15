@@ -9,5 +9,11 @@ loader:
     overwrite: False
     target_fps: 30
     output_dir: ${output_dir}
+    # Optional text file(s) listing motions relative to data_path; when unset, data_path is globbed.
+    file_list: null
+    # Dataset root that must never be written to; output_dir inside it (or inside data_path) is refused.
+    read_only_root: null
+    # In multi_process mode, let each worker parse its own files instead of the producer thread.
+    load_in_worker: False
     
     robot: ${robot}

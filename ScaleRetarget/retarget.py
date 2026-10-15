@@ -1,7 +1,6 @@
 import os
 import sys
 import hydra
-import joblib
 import multiprocessing as mp
 import threading
 from queue import Queue
@@ -12,6 +11,7 @@ from omegaconf import DictConfig
 from loguru import logger
 
 from scaleretarget.utils.multi_process import (
+    dump_atomic,
     initialize_worker,
     process_single_item,
     producer,
@@ -45,29 +45,32 @@ def main(config: DictConfig) -> None:
     # Perform retargeting
     if config.multi_process:
         assert not config.record_video, f"record_video should be set to False when using multi_process!"
-        total_motion_num = data_loader.data_num
+        total_motion_num = data_loader.data_num - data_loader.done_num
         configured_workers = config.get("num_workers")
         worker_count = min(configured_workers or mp.cpu_count(), total_motion_num)
         if worker_count < 1:
             logger.info("No motions to retarget.")
             return
         logger.info(f"Using {worker_count} worker processes")
+        # Parsing large files in the producer thread serializes the run, so workers can load them instead.
+        load_in_worker = config.loader.config.get("load_in_worker", False)
         ctx = mp.get_context('spawn')
         queue = Queue(maxsize=worker_count)
         producer_thread = threading.Thread(
             target=producer,
-            args=(data_loader, queue),
+            args=(data_loader, queue, load_in_worker),
             daemon=True,
         )
         producer_thread.start()
     
+        failed_paths = []
         with ProcessPoolExecutor(
             max_workers=worker_count,
             mp_context=ctx,
             initializer=initialize_worker,
-            initargs=(config.retargeter, config.formatter),
+            initargs=(config.retargeter, config.formatter, config.loader if load_in_worker else None),
         ) as executor:
-            futures = set()
+            futures = {}
             active = True
             success_num = 0
 
@@ -77,24 +80,31 @@ def main(config: DictConfig) -> None:
                     if item is None:
                         active = False
                         break
-                    futures.add(executor.submit(process_single_item, item))
+                    futures[executor.submit(process_single_item, item)] = item[-1] if load_in_worker else item[0]
 
                 if not futures:
                     continue
 
-                completed, futures = wait(
+                completed, _ = wait(
                     futures,
                     return_when=FIRST_COMPLETED,
                 )
                 for future in completed:
+                    item_path = futures.pop(future)
                     try:
                         future.result()
                         success_num += 1
                         logger.info(f"Success/Total: {success_num}/{total_motion_num}")
                     except Exception as e:
-                        logger.exception(f"Processing error for item: {e}")
+                        failed_paths.append(item_path)
+                        logger.exception(f"Processing error for {item_path}: {e}")
 
         producer_thread.join()
+        if failed_paths:
+            failed_log = os.path.join(HydraConfig.get().runtime.output_dir, "failed.txt")
+            with open(failed_log, "w") as f:
+                f.write("\n".join(failed_paths) + "\n")
+            logger.warning(f"{len(failed_paths)} motions failed; listed in {failed_log}")
 
     else:
         # Initialize retargeter and saving formatter
@@ -106,10 +116,7 @@ def main(config: DictConfig) -> None:
             qpos_list = retargeter.retarget(frames)
             formatted_results = formatter.format(qpos_list, extras)
 
-            os.makedirs(os.path.dirname(save_path), exist_ok=True)
-            # with open(save_path, "wb") as f:
-            #     pickle.dump(formatted_results, f)
-            joblib.dump(formatted_results, save_path)
+            dump_atomic(formatted_results, save_path)
             logger.info(f"Retargeted motion saved to {save_path}")
 
         retargeter.finish()

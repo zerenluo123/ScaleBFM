@@ -1,0 +1,110 @@
+# Upper body follows soma_to_unitree_g1.yaml (NVIDIA soma-retargeter calibration); the G1-D
+# torso and arms are kinematically identical to G1 from torso_link up. Leg entries are dropped.
+# Upper-body weights are those of soma-retargeter v0.1.0, the version that produced the official
+# BONES-SEED G1 CSVs (v0.2.0's shoulder orientation weight 2.0 makes abducting the arms cheaper than
+# raising them forward, so overhead reaches fall ~10 cm short).
+# Hips drives pelvis_proxy, a frame on Pitching_Link placed where the G1 pelvis would sit under
+# the G1-D torso, so lift height, chassis x/y and chassis yaw all come from the human hips.
+robot_root_name: pelvis_proxy
+human_root_name: Hips
+ground_height: 0.0
+human_height_assumption: 1.8 # unused: SomaLoader passes no height, all SOMA Uniform motions share one skeleton
+
+# Hips keeps human scale: with 0.785 (the G1 ratio) a standing human would put the lift at the
+# bottom of its stroke; at 1.0 standing (Hips ~0.99 m) leaves the lift near 0.19 m of 0.42 m.
+# Chest and arms are scaled relative to Hips with the G1 ratio.
+human_scale_table:
+  Hips: 1.0
+  Chest: 0.7851486802101135
+  LeftArm: 0.7851486802101135
+  LeftForeArm: 0.7851486802101135
+  LeftHand: 0.7851486802101135
+  RightArm: 0.7851486802101135
+  RightForeArm: 0.7851486802101135
+  RightHand: 0.7851486802101135
+
+ik_match_table:
+  pelvis_proxy:
+    - Hips
+    - 15.0
+    - 10.0
+    - [0.0, 0.0, 0.0]
+    - [-0.4992, -0.4992, -0.5008, -0.5008]
+  torso_link:
+    - Chest
+    - 0.7
+    - 0.7
+    - [0.0025, 0.0, -0.1096]
+    - [-0.4991, -0.4991, -0.5009, -0.5009]
+  left_shoulder_roll_link:
+    - LeftArm
+    - 1.5
+    - 0.15
+    - [0.0102, 0.0123, -0.0383]
+    - [0.452, -0.5659, -0.5131, 0.4607]
+  left_elbow_link:
+    - LeftForeArm
+    - 1.0
+    - 1.0
+    - [0.0148, -0.0187, 0.0016]
+    - [0.645, -0.7636, 0.0177, 0.0228]
+  left_wrist_yaw_link:
+    - LeftHand
+    - 2.0
+    - 1.2
+    - [0.0, 0.0, 0.0]
+    - [0.6925, -0.7195, 0.0266, 0.0459]
+  right_shoulder_roll_link:
+    - RightArm
+    - 1.5
+    - 0.15
+    - [0.0102, -0.0123, -0.0383]
+    - [-0.5131, 0.4607, -0.452, 0.5659]
+  right_elbow_link:
+    - RightForeArm
+    - 1.0
+    - 1.0
+    - [0.0148, 0.0187, 0.0016]
+    - [0.0177, 0.0228, -0.645, 0.7636]
+  right_wrist_yaw_link:
+    - RightHand
+    - 2.0
+    - 1.2
+    - [0.0, 0.0, 0.0]
+    - [0.0266, 0.0459, -0.6925, 0.7195]
+
+# Converge every frame: run all QP steps (no early stop) without per-task LM damping.
+ik_solver:
+  max_iter: 14
+  tolerance: null
+  damping: 0.1
+  lm_damping: 0.0
+
+# Converging every frame removes the lag that used to keep the arm on one branch, so without this the
+# arm swaps branches within a frame when two solutions are about equally good. Steps of an arm joint
+# above ~threshold rad per motion frame are pulled back. Lower thresholds also stretch the ~3 rad
+# pitch/yaw sweep needed to pass the shoulder gimbal lock (arm raised sideways) over more frames, so the
+# hand stalls before going overhead; 0.7 keeps that short while still removing the fast jumps.
+frame_smooth:
+  weight: 1.0
+  threshold: 0.7
+  joints: [left_shoulder_pitch_joint, left_shoulder_roll_joint, left_shoulder_yaw_joint, left_elbow_joint,
+           left_wrist_roll_joint, left_wrist_pitch_joint, left_wrist_yaw_joint,
+           right_shoulder_pitch_joint, right_shoulder_roll_joint, right_shoulder_yaw_joint, right_elbow_joint,
+           right_wrist_roll_joint, right_wrist_pitch_joint, right_wrist_yaw_joint]
+
+# Shoulder comfort zone, port of soma-retargeter's smooth_joint_filter (v0.1.0 masks 0.1/1.0/0.3,
+# offset 1.02 rad, on the hardware ranges below as soma-retargeter does). It pulls the shoulder back
+# from both ends of its range and removes most of the jumps left after narrowing the arm limits in
+# g1d_mocap.xml. Relative to the tracking weights above, 2-3.5 trades jumps against wrist accuracy;
+# soma-retargeter v0.1.0 uses 5.5 with soft limits, which here costs several cm on overhead reaches.
+joint_comfort:
+  weight: 2.5
+  offset: 1.02
+  joints: # name: [mask, lower, upper]
+    left_shoulder_pitch_joint: [0.1, -3.0892, 2.6704]
+    left_shoulder_roll_joint: [1.0, -1.5882, 2.2515]
+    left_shoulder_yaw_joint: [0.3, -2.618, 2.618]
+    right_shoulder_pitch_joint: [0.1, -3.0892, 2.6704]
+    right_shoulder_roll_joint: [1.0, -2.2515, 1.5882]
+    right_shoulder_yaw_joint: [0.3, -2.618, 2.618]

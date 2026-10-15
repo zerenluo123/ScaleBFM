@@ -1,0 +1,108 @@
+# Ported from NVIDIA soma-retargeter (soma_to_g1_scaler_config.json + soma_to_g1_retargeter_config.json).
+# Offsets are identical; quaternions converted from warp xyzw to wxyz.
+robot_root_name: pelvis
+human_root_name: Hips
+ground_height: 0.0
+human_height_assumption: 1.8 # unused: SomaLoader passes no height, all SOMA Uniform motions share one skeleton
+
+human_scale_table:
+  Hips: 0.7851486802101135
+  LeftLeg: 0.7851486802101135
+  LeftShin: 0.7851486802101135
+  LeftFoot: 0.7851486802101135
+  RightLeg: 0.7851486802101135
+  RightShin: 0.7851486802101135
+  RightFoot: 0.7851486802101135
+  Chest: 0.7851486802101135
+  LeftArm: 0.7851486802101135
+  LeftForeArm: 0.7851486802101135
+  LeftHand: 0.7851486802101135
+  RightArm: 0.7851486802101135
+  RightForeArm: 0.7851486802101135
+  RightHand: 0.7851486802101135
+
+ik_match_table:
+  pelvis:
+    - Hips
+    - 15.0
+    - 10.0
+    - [0.0, 0.0, 0.0]
+    - [-0.4992, -0.4992, -0.5008, -0.5008]
+  left_hip_roll_link:
+    - LeftLeg
+    - 1.5
+    - 0.15
+    - [-0.0292, 0.0379, -0.0641]
+    - [0.4544, 0.4544, -0.5418, -0.5418]
+  left_knee_link:
+    - LeftShin
+    - 10.0
+    - 1.0
+    - [-0.0176, 0.0401, -0.0343]
+    - [0.5, 0.5, -0.5, -0.5]
+  left_ankle_roll_link:
+    - LeftFoot
+    - 30.0
+    - 2.0
+    - [0.0, 0.0, -0.0188]
+    - [0.6953, 0.6953, -0.1284, -0.1284]
+  right_hip_roll_link:
+    - RightLeg
+    - 1.5
+    - 0.15
+    - [-0.0292, -0.0379, -0.0641]
+    - [-0.5418, -0.5418, -0.4544, -0.4544]
+  right_knee_link:
+    - RightShin
+    - 10.0
+    - 1.0
+    - [-0.0176, -0.0401, -0.0343]
+    - [-0.5, -0.5, -0.5, -0.5]
+  right_ankle_roll_link:
+    - RightFoot
+    - 30.0
+    - 2.0
+    - [0.0, 0.0, -0.0188]
+    - [-0.1284, -0.1284, -0.6953, -0.6953]
+  torso_link:
+    - Chest
+    - 0.7
+    - 4.0
+    - [0.0025, 0.0, -0.1096]
+    - [-0.4991, -0.4991, -0.5009, -0.5009]
+  left_shoulder_roll_link:
+    - LeftArm
+    - 1.5
+    - 2.0
+    - [0.0102, 0.0123, -0.0383]
+    - [0.452, -0.5659, -0.5131, 0.4607]
+  left_elbow_link:
+    - LeftForeArm
+    - 1.0
+    - 2.0
+    - [0.0148, -0.0187, 0.0016]
+    - [0.645, -0.7636, 0.0177, 0.0228]
+  left_wrist_yaw_link:
+    - LeftHand
+    - 10.0
+    - 1.5
+    - [0.0, 0.0, 0.0]
+    - [0.6925, -0.7195, 0.0266, 0.0459]
+  right_shoulder_roll_link:
+    - RightArm
+    - 1.5
+    - 2.0
+    - [0.0102, -0.0123, -0.0383]
+    - [-0.5131, 0.4607, -0.452, 0.5659]
+  right_elbow_link:
+    - RightForeArm
+    - 1.0
+    - 2.0
+    - [0.0148, 0.0187, 0.0016]
+    - [0.0177, 0.0228, -0.645, 0.7636]
+  right_wrist_yaw_link:
+    - RightHand
+    - 10.0
+    - 1.5
+    - [0.0, 0.0, 0.0]
+    - [0.0266, 0.0459, -0.6925, 0.7195]

@@ -38,6 +38,10 @@ dependencies = [
   "typer",
   "joblib",
   "easydict",
+  # BONES-SEED survey, zoning and browser panel.
+  "pandas",
+  "pyarrow",
+  "PySide6-Essentials",
   # Official Blender wheels for this environment target CPython 3.11.
   "bpy>=4.5,<5.1",
 ]
