@@ -38,7 +38,7 @@ dependencies = [
   "typer",
   "joblib",
   "easydict",
-  # BONES-SEED survey, zoning and browser panel.
+  # Dataset survey, zoning and browser panel (scaleretarget/pipeline, scripts/).
   "pandas",
   "pyarrow",
   "PySide6-Essentials",

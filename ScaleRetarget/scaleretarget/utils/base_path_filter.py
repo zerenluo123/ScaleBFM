@@ -12,6 +12,14 @@ def lowpass(x, fps, cutoff_hz):
     return filtfilt(b, a, x, axis=0, method="gust")
 
 
+def heading_yaw(pelvis_rot):
+    """(n,) yaw (rad) a pelvis Rotation faces: the ground direction square to its left axis. The forward
+    axis points at the floor in a deep forward bend and its ground projection flips by 180 deg there;
+    the left axis stays level through forward and backward bends."""
+    left = pelvis_rot.apply([0.0, 1.0, 0.0])
+    return np.arctan2(-left[:, 0], left[:, 1])
+
+
 def plan_base_path(xy, pelvis_yaw, fps, cutoff_hz, max_speed, max_turn_rate=None):
     """(n, 2) positions and (n,) headings a differential drive can follow: the heading is the smoothed
     pelvis yaw, turned no faster than max_turn_rate if given, and of the smoothed human motion only the
@@ -33,8 +41,7 @@ def filter_base_path(frames, root_name, root_rot_offset, fps, cutoff_hz, max_spe
     offset, the same way the root height filter shifts every bone vertically."""
     xy = np.array([frame[root_name][0][:2] for frame in frames])
     root_rot = R.from_quat(np.array([frame[root_name][1] for frame in frames]), scalar_first=True)
-    forward = (root_rot * root_rot_offset).apply([1.0, 0.0, 0.0])
-    pelvis_yaw = np.arctan2(forward[:, 1], forward[:, 0])
+    pelvis_yaw = heading_yaw(root_rot * root_rot_offset)
     path, heading = plan_base_path(xy, pelvis_yaw, fps, cutoff_hz, max_speed, max_turn_rate)
     pivot = np.column_stack([path, np.zeros(len(path))])
     shift = pivot - np.column_stack([xy, np.zeros(len(xy))])

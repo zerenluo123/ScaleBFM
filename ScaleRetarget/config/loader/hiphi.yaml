@@ -1,0 +1,42 @@
+# @package _global_
+
+defaults:
+  - base
+
+loader:
+  _target_: scaleretarget.loader.hiphi_loader.HiphiLoader
+  _recursive_: False
+  config:
+    loader_type: hiphi
+    data_format: .bvh
+    load_in_worker: True
+    # Height (m) of the ankle joint a motion stands on (see planted_ankle_height in the loader) on the SOMA
+    # Uniform skeleton, median over 177 motions; NVIDIA's -1.88 cm ankle offset is tuned for it. Each HiPHI
+    # motion is shifted vertically to match it: HiPHI's own goes with the capture calibration (10-90%
+    # 6.0-10.9 cm over 5560 motions, within 0.3 cm between motions of one calibration), not the performer.
+    planted_ankle_height: 0.064
+    # HiPHI median, for motions that never stand on a straight leg (2 in 5562, sitting on the floor).
+    typical_planted_ankle_height: 0.072
+    # Distance (cm) of each tracked joint from the previous one (Arm and UpLeg: from the mid hip joints,
+    # where HiPHI's Hips is) that every motion's skeleton is rescaled to on its rest pose (T-pose), see
+    # segment_ratios; HiPHI names (UpLeg / Leg / Foot = SOMA Leg / Shin / Foot). Limbs and UpLeg: the
+    # BONES-SEED SOMA Uniform lengths (90th percentile over 200 random motions; fixed lengths). Arm: the
+    # mid hip joints to shoulder distance moves with the spine and shoulder blades, so it is the T-pose
+    # length at which 56 HiPHI walks have the median over frames of 200 SOMA walks.
+    reference_distances:
+      LeftArm: 52.48
+      LeftForeArm: 28.74
+      LeftHand: 27.09
+      RightArm: 52.24
+      RightForeArm: 28.74
+      RightHand: 27.13
+      LeftUpLeg: 10.05
+      LeftLeg: 43.23
+      LeftFoot: 42.30
+      RightUpLeg: 10.05
+      RightLeg: 43.37
+      RightFoot: 42.26
+    # Where SOMA Uniform's Hips is relative to its mid hip joints (8.4 cm above, 2.6 cm behind), median over
+    # the same 200 motions, in the HiPHI Hips frame (cm). The loader moves HiPHI's Hips, at the mid hip
+    # joints, there.
+    hips_offset: [0.0, 8.37, -2.61]

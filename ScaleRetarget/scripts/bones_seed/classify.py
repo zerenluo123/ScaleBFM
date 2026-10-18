@@ -1,10 +1,4 @@
-"""Assign red / yellow / green zones to BONES-SEED clips for the g1d retarget.
-
-red     not usable on g1d: non-upright, airborne/terrain, sitting or lying on the floor, or mostly near it
-yellow  usable but partly outside the g1d workspace (lift stroke, lean-back, base speed)
-green   inside the workspace on (almost) every frame
-
-Lift speed is reported but does not decide the zone.
+"""Assign red / yellow / green zones to BONES-SEED clips for the g1d retarget (rules: scaleretarget/pipeline/workspace.py).
 
     python scripts/bones_seed/classify.py --survey survey_raw.parquet --out_dir DIR
 """
@@ -15,21 +9,7 @@ import os
 import pandas as pd
 
 from dataset import BONES, BVH_PREFIX, METADATA
-
-NON_UPRIGHT = (
-    r"\b(?:crawl|all fours|hands and knees|lying|plank|handstand|standing on hands|flip|rolling|cartwheel"
-    r"|somersault|push.?up|swim|prone|superman|flying with wings"
-    r"|faint|fall(?:s|ing)? down|falls? (?:to|on|onto) the (?:ground|floor)|rise up|rising up)"
-)
-TERRAIN = r"climb|ladder|stairs|on a box|onto .*box|from (?:a|the) box|obstacle|vault|parkour"
-# Jumps stay in when they are kinematically inside the workspace (in-place jumps, dance hops);
-# their vertical speed is handled by the root height filter, not by zoning.
-JUMP = r"jump"
-
-FLOOR_FRAC = 0.5
-# A deep squat keeps the Hips above ~0.2 m; lower means sitting or lying on the floor.
-SEATED_HIPS_Z = 0.15
-OUT_WS_FRAC = 0.01
+from scaleretarget.pipeline.workspace import assign_zones, write_lists
 
 
 def assign(df):
@@ -41,30 +21,7 @@ def assign(df):
         terrain_text + " | " + df.content_short_description_2.fillna("") + " | "
         + df.content_name.fillna("").str.replace("_", " ") + " | " + df.filename.str.replace("_", " ")
     )
-    zone = pd.Series("green", index=df.index)
-    reason = pd.Series("", index=df.index)
-
-    out_ws = df.frac_out_ws > OUT_WS_FRAC
-    crit = df[["frac_lift_low", "frac_lift_high", "frac_pitch_back", "frac_pitch_fwd", "frac_base_fast"]]
-    names = {
-        "frac_lift_low": "升降到底",
-        "frac_lift_high": "升降到顶",
-        "frac_pitch_back": "后仰超限",
-        "frac_pitch_fwd": "前俯超限",
-        "frac_base_fast": "底盘超速",
-    }
-    zone[out_ws] = "yellow"
-    reason[out_ws] = crit[out_ws].idxmax(axis=1).map(names)
-
-    floor = (df.frac_floor > FLOOR_FRAC) | (df.hips_z_min < SEATED_HIPS_Z)
-    zone[floor], reason[floor] = "red", "贴地"
-    jump = terrain_text.str.contains(JUMP, case=False, regex=True) & out_ws
-    zone[jump], reason[jump] = "red", "跳跃（出工作空间）"
-    terrain = terrain_text.str.contains(TERRAIN, case=False, regex=True)
-    zone[terrain], reason[terrain] = "red", "地形"
-    upright = upright_text.str.contains(NON_UPRIGHT, case=False, regex=True)
-    zone[upright], reason[upright] = "red", "非直立"
-    return zone, reason
+    return assign_zones(df, upright_text, terrain_text)
 
 
 def main():
@@ -95,11 +52,7 @@ def main():
     out = df[cols].sort_values(["zone", "reason", "category", "filename"])
     out.to_csv(f"{args.out_dir}/bones_seed_zones.csv", index=False, float_format="%.4g")
     out.to_parquet(f"{args.out_dir}/bones_seed_zones.parquet")
-    # Paths relative to the BVH root, so the lists can be passed as loader.config.file_list.
-    bvh_rel = df.move_soma_uniform_path.str.removeprefix(BVH_PREFIX)
-    for z in ["red", "yellow", "green"]:
-        with open(f"{args.out_dir}/{z}.txt", "w") as f:
-            f.write("\n".join(bvh_rel[df.zone == z]) + "\n")
+    write_lists(df.zone, df.move_soma_uniform_path.str.removeprefix(BVH_PREFIX), args.out_dir)
     print("written", args.out_dir)
 
 

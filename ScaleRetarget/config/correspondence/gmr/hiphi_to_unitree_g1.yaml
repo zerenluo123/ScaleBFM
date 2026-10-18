@@ -1,0 +1,123 @@
+# HiPHI version of soma_to_unitree_g1.yaml: same links, weights, scale table and limb position offsets.
+# HiphiLoader rescales each motion limb by limb to the SOMA Uniform proportions, so the SOMA scale table
+# applies unchanged; bone names, rotation offsets and the torso position offset differ.
+# Torso: Spine2 (lower thoracic). Of the five HiPHI spine bones it follows the trunk (hips -> shoulders) the way
+# SOMA Chest does when bending, side-bending and twisting; Spine4, the parent of neck and shoulders, also turns
+# with the shoulder blades (lifting the arms, shrugging), so its torso target leaned back past the G1-D waist
+# limit on 1 in 5 frames. Its rotation offset is the rest-pose one pitched forward so that on walking motions
+# the target leans ahead of the trunk line (mid hip joints -> mid shoulders, not Hips, which sits ~8 cm higher
+# and ~3 cm further back on SOMA) by as much as with SOMA Chest; its position offset puts the target where it
+# is relative to the shoulder targets with SOMA. Both from scripts/hiphi/calibrate_offsets.py.
+# Rotation offsets: Hips from the HiPHI rest pose, an upright T-pose with every bone frame equal to the world
+# frame. Upper arm / forearm (thigh / shin) align the bone direction and the measured elbow (knee)
+# flexion axis with the robot's link direction and hinge axis, times the small constant rotation by which
+# NVIDIA's SOMA offsets differ from the same construction on SOMA (7-11 deg for the arms, < 1 deg for the
+# legs). Wrists and ankles: the HiPHI rest pose (hand straight on the forearm, foot flat) is the robot with
+# those joints at zero.
+# HiphiLoader moves the forearm twist into the hand, as in SOMA, so the forearm follows the elbow hinge.
+robot_root_name: pelvis
+human_root_name: Hips
+ground_height: 0.0
+human_height_assumption: 1.8 # unused: HiphiLoader passes no height, it rescales every skeleton to SOMA Uniform
+
+human_scale_table:
+  Hips: 0.7851486802101135
+  LeftUpLeg: 0.7851486802101135
+  LeftLeg: 0.7851486802101135
+  LeftFoot: 0.7851486802101135
+  RightUpLeg: 0.7851486802101135
+  RightLeg: 0.7851486802101135
+  RightFoot: 0.7851486802101135
+  Spine2: 0.7851486802101135
+  LeftArm: 0.7851486802101135
+  LeftForeArm: 0.7851486802101135
+  LeftHand: 0.7851486802101135
+  RightArm: 0.7851486802101135
+  RightForeArm: 0.7851486802101135
+  RightHand: 0.7851486802101135
+
+ik_match_table:
+  pelvis:
+    - Hips
+    - 15.0
+    - 10.0
+    - [0.0, 0.0, 0.0]
+    - [0.5000, -0.5000, -0.5000, -0.5000]
+  left_hip_roll_link:
+    - LeftUpLeg
+    - 1.5
+    - 0.15
+    - [-0.0292, 0.0379, -0.0641]
+    - [0.4544, -0.5418, -0.5418, -0.4544]
+  left_knee_link:
+    - LeftLeg
+    - 10.0
+    - 1.0
+    - [-0.0176, 0.0401, -0.0343]
+    - [0.5000, -0.5000, -0.5000, -0.5000]
+  left_ankle_roll_link:
+    - LeftFoot
+    - 30.0
+    - 2.0
+    - [0.0, 0.0, -0.0188]
+    - [0.5001, -0.4999, -0.5001, -0.4999]
+  right_hip_roll_link:
+    - RightUpLeg
+    - 1.5
+    - 0.15
+    - [-0.0292, -0.0379, -0.0641]
+    - [0.4544, -0.5418, -0.5418, -0.4544]
+  right_knee_link:
+    - RightLeg
+    - 10.0
+    - 1.0
+    - [-0.0176, -0.0401, -0.0343]
+    - [0.5000, -0.5000, -0.5000, -0.5000]
+  right_ankle_roll_link:
+    - RightFoot
+    - 30.0
+    - 2.0
+    - [0.0, 0.0, -0.0188]
+    - [0.4999, -0.5001, -0.4999, -0.5001]
+  torso_link:
+    - Spine2
+    - 0.7
+    - 4.0
+    - [-0.0506, 0.0, -0.0319]
+    - [0.5215, -0.4776, -0.4776, -0.5215]
+  left_shoulder_roll_link:
+    - LeftArm
+    - 1.5
+    - 2.0
+    - [0.0102, 0.0123, -0.0383]
+    - [0.7181, -0.0944, -0.6891, -0.0238]
+  left_elbow_link:
+    - LeftForeArm
+    - 1.0
+    - 2.0
+    - [0.0148, -0.0187, 0.0016]
+    - [0.9943, -0.1030, -0.0031, 0.0287]
+  left_wrist_yaw_link:
+    - LeftHand
+    - 10.0
+    - 1.5
+    - [0.0, 0.0, 0.0]
+    - [0.9979, -0.0383, -0.0127, 0.0515]
+  right_shoulder_roll_link:
+    - RightArm
+    - 1.5
+    - 2.0
+    - [0.0102, -0.0123, -0.0383]
+    - [0.0337, -0.6887, -0.0840, -0.7193]
+  right_elbow_link:
+    - RightForeArm
+    - 1.0
+    - 2.0
+    - [0.0148, 0.0187, 0.0016]
+    - [0.0287, 0.0035, 0.0887, 0.9956]
+  right_wrist_yaw_link:
+    - RightHand
+    - 10.0
+    - 1.5
+    - [0.0, 0.0, 0.0]
+    - [0.0513, 0.0134, 0.0239, 0.9983]

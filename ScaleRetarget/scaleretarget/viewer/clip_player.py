@@ -48,13 +48,20 @@ def load_config(robot, loader, overrides=(), snapshot=None):
     the current ones, so the targets match what that version was run with."""
     with tempfile.TemporaryDirectory() as tmp:
         config_dir = os.path.abspath(CONFIG_DIR)
-        if snapshot is not None and os.path.isdir(os.path.join(snapshot, "config")):
+        saved = snapshot is not None and os.path.isdir(os.path.join(snapshot, "config"))
+        if saved:
             shutil.copytree(config_dir, tmp, dirs_exist_ok=True)
             shutil.copytree(os.path.join(snapshot, "config"), tmp, dirs_exist_ok=True)
             config_dir = tmp
         with initialize_config_dir(config_dir=config_dir, version_base=None):
-            return compose("base", overrides=[f"+robot={robot}", f"+loader={loader}", "data_path=unused",
-                                              "enable_viewer=false", *overrides])
+            config = compose("base", overrides=[f"+robot={robot}", f"+loader={loader}", "data_path=unused",
+                                                "enable_viewer=false", *overrides])
+    if saved:
+        # The correspondence is named by path (relative to the ScaleRetarget folder), not composed.
+        copy = os.path.join(snapshot, config.retargeter.config.ik_config)
+        if os.path.isfile(copy):
+            config.retargeter.config.ik_config = copy
+    return config
 
 
 def load_official_csv(path, source_fps=120, target_fps=30):
