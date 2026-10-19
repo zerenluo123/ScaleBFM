@@ -106,30 +106,48 @@ python scripts/hiphi/exclude_ood.py --version v1 --apply
 
 ## 7. 在服务器上跑
 
-服务器 `ssh hkeai-test`，代码在 `~/humanoid_wbc/ScaleBFM`。224 核，和别人共用，转换用 64–96 进程。服务器没有图形界面：
-`retarget.sh` 发现没有显示器就不开面板，改成在后台每 60 秒更新一次帧缓存（`vN/cache.log`），转换结束时再更新一次。
-面板在本机通过 sshfs 挂载只读缓存。
+服务器 `ssh hkeai-test`（47.79.124.13，端口 31124，用户 luozr），代码在 `~/humanoid_wbc/ScaleBFM`，数据在
+`~/humanoid_wbc/bfm_datasets`（`HiPHI`、`HiPHI_unpacked`、`HiPHI_retarget`，BONES-SEED 的 `bones-seed`、`bone-seed_retarget`
+也在这里）。224 核，和别人共用，转换用 64–96 进程。服务器没有图形界面：`retarget.sh` 发现没有显示器就不开面板，改成在后台
+每 60 秒更新一次帧缓存（`vN/cache.log`），转换结束时再更新一次。面板在本机通过 sshfs 挂载只读缓存。
 
 第一次准备（环境和数据只做一次）：
 
 ```bash
 ssh hkeai-test
 cd ~/humanoid_wbc/ScaleBFM && git pull
-# 环境：Python 3.11 + ScaleRetarget，再装解压用的 zstd 和下载用的 huggingface_hub
-conda create -n scaleretarget python=3.11 -y && conda activate scaleretarget
-pip install -e ScaleRetarget && conda install -c conda-forge zstd -y && pip install -U huggingface_hub
-# 数据：HiPHI 要先在网页上申请权限，然后登录下载（约 250 GB）
-hf auth login
-hf download noitomrobotics/HiPHI --repo-type dataset --local-dir ~/bfm_datasets/HiPHI
+# 环境：Python 3.11 + ScaleRetarget，解压用的 zstd，下载用的 huggingface_hub。
+# /etc/pip.conf 里有一个这台机器解析不了的源，pip 加 --isolated 绕开。
+source ~/miniconda3/etc/profile.d/conda.sh
+conda create -n scaleretarget -c conda-forge --override-channels python=3.11 zstd pip -y && conda activate scaleretarget
+python -m pip --isolated install -e ScaleRetarget "huggingface_hub[hf_xet]"
+# 数据：两个数据集都要先在网页上申请权限，再 hf auth login（或拷本机的 ~/.cache/huggingface/token）。约 200 MB/s。
+D=~/humanoid_wbc/bfm_datasets
+hf download noitomrobotics/HiPHI --repo-type dataset --local-dir $D/HiPHI
+hf download bones-studio/seed soma_uniform.tar.gz g1.tar.gz metadata/seed_metadata_v004.parquet \
+  --repo-type dataset --local-dir $D/bones-seed
+cd $D/bones-seed && tar -xzf soma_uniform.tar.gz && tar -xzf g1.tar.gz
 ```
 
-之后每次都先设好路径：
+之后每次都先 `source ~/humanoid_wbc/bfm_env.sh`：设好两个数据集的路径变量、激活环境、进 `ScaleRetarget` 目录。内容是
 
 ```bash
-export HIPHI=~/bfm_datasets/HiPHI HIPHI_UNPACKED=~/bfm_datasets/HiPHI_unpacked HIPHI_OUT=~/bfm_datasets/HiPHI_retarget
-cd ~/humanoid_wbc/ScaleBFM/ScaleRetarget && conda activate scaleretarget
+export BFM=~/humanoid_wbc/bfm_datasets
+export BONES_SEED=$BFM/bones-seed BONES_SEED_OUT=$BFM/bone-seed_retarget
+export HIPHI=$BFM/HiPHI HIPHI_UNPACKED=$BFM/HiPHI_unpacked HIPHI_OUT=$BFM/HiPHI_retarget
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+source ~/miniconda3/etc/profile.d/conda.sh && conda activate scaleretarget
+cd ~/humanoid_wbc/ScaleBFM/ScaleRetarget
+```
 
-python scripts/hiphi/unpack.py --all
+线程数那一行不能省：这台机器（容器）限制所有用户加起来的线程总数（约 16k，别人的任务常占 8k 左右），numpy / torch 默认
+按 224 核开线程池，每个进程约 130 个线程，64 个进程就撞上限。撞上时 MuJoCo 加载模型报 `Caught an unknown exception!`，
+严重时 luozr 的所有进程连同 tmux 一起被杀。设成 1 以后每个进程约 1 个线程，两个数据集各开 96 进程同时跑也只有几百个线程。
+
+然后：
+
+```bash
+python scripts/hiphi/unpack.py --all          # 一个 part 接一个 part；32 个 part 约 860 GB
 python scripts/hiphi/survey.py --out $HIPHI_OUT/survey/survey_raw.parquet --workers 96
 python scripts/hiphi/classify.py --survey $HIPHI_OUT/survey/survey_raw.parquet --out_dir $HIPHI_OUT/survey
 VERSION=v1 NOTE="first run" NUM_WORKERS=64 scripts/hiphi/retarget.sh    # 建议在 tmux 里跑
@@ -138,14 +156,16 @@ VERSION=v1 NOTE="first run" NUM_WORKERS=64 scripts/hiphi/retarget.sh    # 建议
 本机看进度、播放：
 
 ```bash
-sshfs hkeai-test:/home/luozr ~/mnt/hkeai -o reconnect,ServerAliveInterval=15
-HIPHI=~/mnt/hkeai/bfm_datasets/HiPHI HIPHI_UNPACKED=~/mnt/hkeai/bfm_datasets/HiPHI_unpacked \
-HIPHI_OUT=~/mnt/hkeai/bfm_datasets/HiPHI_retarget \
+mkdir -p ~/mnt/hkeai && sshfs hkeai-test:/home/luozr ~/mnt/hkeai -o reconnect,ServerAliveInterval=15,max_read=1048576,idmap=user
+R=~/mnt/hkeai/humanoid_wbc/bfm_datasets
+HIPHI=$R/HiPHI HIPHI_UNPACKED=$R/HiPHI_unpacked HIPHI_OUT=$R/HiPHI_retarget \
 python scripts/hiphi/browse.py --version v1 --cache_only
 ```
 
 `--cache_only` 只读服务器写的 `vN/frame_counts.csv` 和 `vN/ood/frame_counts.csv`，不在挂载上遍历 pkl；标题栏会显示「只读缓存」，
-进度行显示缓存最后更新的时间。右键剔除 / 恢复照常（直接在挂载上移动文件，以 `vN/ood/ood.csv` 为准）。播放时 BVH 也走挂载读。
+进度行显示缓存最后更新的时间。右键剔除 / 恢复照常（直接在挂载上移动文件，以 `vN/ood/ood.csv` 为准）。播放时 BVH 也走挂载读：
+挂载读约 3 MB/s（不加 `max_read` 只有约 2 MB/s，开压缩没用），HiPHI 的 BVH 一条 20 MB 上下，点开要等 7 秒左右。
+不用了 `fusermount -u ~/mnt/hkeai`；已经挂着时再挂一次会报 `failed to access mountpoint: Permission denied`，先卸再挂。
 
 第 4–6 步在服务器上照常跑（同样先设路径），`--workers` 可以开到 64。
 

@@ -60,7 +60,7 @@ python scripts/bones_seed/browse.py --build_cache v1
 python scripts/bones_seed/browse.py --build_cache v1 --loop 60    # 每 60 秒更新一次，直到 Ctrl-C
 ```
 
-版本在别的机器上转、本机通过挂载看时，面板加 `--cache_only`：只读那台机器维护的缓存，不在挂载上遍历 pkl（见 `scripts/hiphi/SOP.md` 第 7 节）。
+版本在别的机器上转、本机通过挂载看时，面板加 `--cache_only`：只读那台机器维护的缓存，不在挂载上遍历 pkl（见第 7 节）。
 
 ## 4. 质量检查
 
@@ -117,3 +117,22 @@ pkl 从 `vN/bvh/<rel>.pkl` 移到 `vN/ood/bvh/<rel>.pkl`，记在 `vN/ood/ood.cs
 面板里手动放回去的片段没有单独记录。规则没变就再跑 `--apply`，会再次剔除。先跑不带 `--apply` 的那条看名单。
 
 剔除后再跑一遍第 4 步，质量报告就是留下的数据集。
+
+## 7. 在服务器上跑
+
+服务器、环境、下载和本机挂载看面板见 `scripts/hiphi/SOP.md` 第 7 节；数据在 `~/humanoid_wbc/bfm_datasets/bones-seed`，
+产物在 `~/humanoid_wbc/bfm_datasets/bone-seed_retarget`。每次先 `source ~/humanoid_wbc/bfm_env.sh`（设好 `BONES_SEED`、
+`BONES_SEED_OUT`），第 1–6 步的命令把路径换成 `$BONES_SEED_OUT` 照常跑，`--workers` 开到 64：
+
+```bash
+python scripts/bones_seed/survey.py --out $BONES_SEED_OUT/survey/survey_raw.parquet --workers 64
+python scripts/bones_seed/classify.py --survey $BONES_SEED_OUT/survey/survey_raw.parquet --out_dir $BONES_SEED_OUT/survey
+VERSION=v1 NOTE="first run" NUM_WORKERS=64 scripts/bones_seed/retarget.sh    # 建议在 tmux 里跑
+```
+
+本机看进度、播放：
+
+```bash
+R=~/mnt/hkeai/humanoid_wbc/bfm_datasets
+BONES_SEED=$R/bones-seed BONES_SEED_OUT=$R/bone-seed_retarget python scripts/bones_seed/browse.py --version v1 --cache_only
+```
