@@ -5,7 +5,9 @@ and one long natural sentence. Terrain and non-upright motion are matched on the
 adds non-upright words after the ones it uses in other senses are removed ("rolling shoulders", "the box
 lying on the floor", "rise up tall"). Jumps are matched on both. Sitting or lying on the floor is caught
 by the hips height. Clips the loader cannot read (BVHs of a reduced skeleton with only Spine and Spine1, so
-no Spine2 for the torso target) are red with the reason 骨架不支持.
+no Spine2 for the torso target) are red with the reason 骨架不支持. Clips whose reference arm pops on any
+step (a twist flip or a hand flip faster than a human arm turns, see survey.py) are red with the reason
+参考数据跳变: the pop is in the data, so no retarget can follow it.
 
     python scripts/hiphi/classify.py --survey survey_raw.parquet --out_dir DIR
 """
@@ -41,6 +43,8 @@ def main():
     failed = df.error != ""
     df["zone"], df["reason"] = "red", "骨架不支持"
     df.loc[~failed, "zone"], df.loc[~failed, "reason"] = assign(df[~failed])
+    pops = ~failed & (df.ref_pops > 0)
+    df.loc[pops, "zone"], df.loc[pops, "reason"] = "red", "参考数据跳变"
     # A mirrored clip has its original's skeleton (offsets mirrored); both count as one capture session.
     original = df.motion_id.str.removesuffix(MIRROR)
     df["session"] = df.actor_id + "/" + original.map(dict(zip(df.motion_id, df.skeleton))).fillna(df.skeleton)
@@ -51,7 +55,7 @@ def main():
         "stands", "ground_shift", "hips_z_min", "hips_z_p50", "hips_z_max", "frac_lift_low", "frac_lift_high",
         "frac_floor", "pitch_min", "pitch_max", "frac_pitch_back", "frac_pitch_fwd", "base_speed_max",
         "frac_base_fast", "frac_out_ws", "lift_speed_p95", "frac_lift_fast", "hand_z_min", "hand_z_max",
-        "base_path_m", "error",
+        "base_path_m", "ref_twist_flips", "ref_hand_flips", "ref_pops", "ref_pop_peak", "turned_frames", "error",
     ]
     os.makedirs(args.out_dir, exist_ok=True)
     out = df[cols].sort_values(["zone", "reason", "frame_lu", "motion_id"])

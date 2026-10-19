@@ -75,6 +75,65 @@ def planted_ankle_height(positions, bones, leg_length, min_frames):
     return np.percentile(ankle[standing, 2], 10) if standing.sum() >= min_frames else None
 
 
+# Bones whose children all lie on their up axis (y), so that a turn about it moves no joint.
+TRUNK = ("Spine", "Spine1", "Spine2", "Spine3", "Neck", "Neck1", "Head")
+ARMS = ("LeftArm", "RightArm")
+
+
+def quarter_turns(angle):
+    """Nearest multiple of 90 deg to angle (rad), in quarter turns 0..3."""
+    return int(np.round(angle / (np.pi / 2))) % 4
+
+
+def canonical_frames(bvh_data):
+    """Turn the bone frames that some HiPHI captures set a quarter or half turn off the others, about axes
+    the joint positions do not fix, back to the common convention, in place. Returns {bone: quarter turns}.
+
+    In those captures the trunk and neck bones (TRUNK) are half a turn off about their up axis: the shoulder
+    line lies along -x of their frames instead of +x (Hips and Spine4 are not, so Spine, Spine4 and Neck show
+    ~180 deg local rotations), and the torso target, on Spine2, faces backwards. Over the dataset the shoulder
+    line (summed over the frames) lies within 90 deg of +x of a trunk bone (a twisted spine, a turned head) or
+    within 30 deg of -x, so a bone beyond 90 deg is turned by half a turn. The same captures, and only those,
+    set the upper arms a quarter turn off about their own axis: the elbow bends towards +y of the arm frame
+    instead of +z. That turn is the elbow bend direction summed over the frames (weighted by how far the elbow
+    is bent), rounded to the nearest quarter turn; in the other captures it is left alone, as it is either
+    that of a twisted upper arm or, for an arm kept straight, noise. The children take the inverse turn in
+    their local rotation and translation, so every joint position and every other bone's frame stays the same.
+    """
+    index = {name: i for i, name in enumerate(bvh_data.bones)}
+    quats, pos = quat_fk(bvh_data.quats, bvh_data.pos, bvh_data.parents)
+    frame = lambda b: R.from_quat(quats[:, index[b]].reshape(-1, 4), scalar_first=True)  # noqa: E731
+    at = lambda b: pos[:, index[b]]  # noqa: E731
+    turns = {}
+    shoulders = at("LeftArm") - at("RightArm")
+    for bone in (b for b in TRUNK if b in index):
+        v = frame(bone).inv().apply(shoulders).sum(0)
+        turns[bone] = (2 * int(abs(np.arctan2(-v[2], v[0])) > np.pi / 2), np.array([0.0, 1.0, 0.0]))
+    if any(k for k, _ in turns.values()):
+        for bone in ARMS:
+            side = bone.removesuffix("Arm")
+            upper = at(f"{side}ForeArm") - at(bone)
+            upper /= np.linalg.norm(upper, axis=1, keepdims=True)
+            lower = at(f"{side}Hand") - at(f"{side}ForeArm")
+            bend = lower - np.sum(lower * upper, axis=1, keepdims=True) * upper
+            v = frame(bone).inv().apply(bend).sum(0)
+            turns[bone] = (-quarter_turns(np.arctan2(v[1], v[2])) % 4, np.array([1.0, 0.0, 0.0]))
+    children = {i: [c for c, p in enumerate(bvh_data.parents) if p == i] for i in range(len(bvh_data.bones))}
+    done = {}
+    for bone, (k, axis) in turns.items():
+        if k == 0:
+            continue
+        turn = R.from_rotvec(axis * k * np.pi / 2)
+        i = index[bone]
+        bvh_data.quats[:, i] = (R.from_quat(bvh_data.quats[:, i], scalar_first=True) * turn).as_quat(scalar_first=True)
+        for c in children[i]:
+            bvh_data.quats[:, c] = (turn.inv() * R.from_quat(bvh_data.quats[:, c], scalar_first=True)).as_quat(scalar_first=True)
+            bvh_data.pos[:, c] = turn.inv().apply(bvh_data.pos[:, c])
+            bvh_data.offsets[c] = turn.inv().apply(bvh_data.offsets[c])
+        done[bone] = k
+    return done
+
+
 def remove_forearm_twist(bvh_data, global_quats):
     """Move the forearm's twist about its own axis (relative to the upper arm) into the hand, in place.
 
@@ -114,6 +173,7 @@ class HiphiLoader(BaseLoader):
         bvh_data = read_bvh_multi_channel(sample_path)
 
         aligned_fps = resample_bvh_motion(bvh_data, self.target_fps)
+        turned = canonical_frames(bvh_data)
 
         reference = self.config.reference_distances
         ratios, own = segment_ratios(bvh_data.bones, bvh_data.parents, rest_pose(bvh_data), reference)
@@ -147,6 +207,7 @@ class HiphiLoader(BaseLoader):
             "fps": aligned_fps,
             "ground_shift": shift,
             "stands": planted is not None,
+            "turned_frames": turned,
         }
 
         return frames, extras

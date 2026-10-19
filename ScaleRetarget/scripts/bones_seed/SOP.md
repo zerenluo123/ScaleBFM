@@ -101,7 +101,7 @@ python scripts/bones_seed/jump_audit.py segments --version v1
 | ref_bug | 参考数据翻转或目标瞬移 | 是，连镜像 |
 | joint_limits | 卡在收窄的肩 / 肘限位 | 是 |
 | wrist_cap | 转腕被逐帧上限挤到肩上 | 是 |
-| fast_motion | 人手臂确实这么快，连杆跟着目标 | 留 |
+| fast_motion | 人手臂确实这么快，连杆跟着目标，机器人跟不上 | 是 |
 
 ## 6. 剔除 OOD
 

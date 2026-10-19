@@ -1,4 +1,5 @@
-"""Move the clips that the jump audit blames on the data or on our joint limits into a version's OOD zone.
+"""Move the clips that the jump audit blames on the data, on our joint limits or on motion too fast for the
+robot into a version's OOD zone.
 
 - an actor whose capture session has twist flips in at least FLIP_SHARE of its scanned clips
   (survey/ref_twist_flips.csv): all of that actor's green and yellow clips of the session
@@ -28,6 +29,7 @@ def reasons(dataset):
         "ref_bug": "参考数据跳变",
         "joint_limits": "卡在收窄的肩/肘限位",
         "wrist_cap": "转腕被逐帧上限挤到肩上",
+        "fast_motion": "动作太快，机器人跟不上",
     }
 
 

@@ -11,6 +11,9 @@
 - 片段名 `rel = {frame}/{motion_id}`，例如 `Adjusting/Adjusting-adjust_0001`；镜像是 `__mirror`。
 - 每个演员有好几套骨架标定（一次采集一套）。loader 把每条片段的骨架缩放到 SOMA Uniform 的比例，前臂扭转挪到手上，
   再按这条片段站立时的脚踝高度上下平移（`config/loader/hiphi.yaml`）。
+- 有些采集的骨骼坐标系和别的不一样（A116–A132 的全部片段，另有 15 个演员的少数采集；35024 条里 346 条）：
+  躯干和脖子（Spine–Spine3、Neck–Head）绕竖轴差半圈，两只上臂绕自身轴差四分之一圈。关节位置看不出来，但躯干目标朝后、
+  肩肘朝向目标差 90°，转出来腰扭 150°、两臂交叉。loader 按几何量出来转回统一约定（`canonical_frames`），关节位置不变。
 - 没有官方 G1 结果。面板「对比标准 G1」和突跳归因的对照，都是当场把同一条片段转到标准 G1（`hiphi_to_unitree_g1.yaml`）。
 
 ```
@@ -32,7 +35,11 @@ python scripts/hiphi/unpack.py --link_only     # 只重建链接
 
 ## 1. 运动学扫描
 
-每条片段用 HiphiLoader 按批量转换的方式读成 30 fps，算工作空间指标；同时记下骨架标定（BVH 骨长的哈希）、帧间隔和 loader 的上下平移量。
+每条片段用 HiphiLoader 按批量转换的方式读成 30 fps，算工作空间指标；同时记下骨架标定（BVH 骨长的哈希）、帧间隔、loader 的上下平移量、
+转回的骨骼坐标系（`turned_frames`），以及参考手臂跳变的帧数。先在 30 fps 上找候选：上臂扭转翻转（上臂、前臂都 > 40 rad/s，
+手 < 20 rad/s）和手翻转（手 > 40 rad/s，上臂、前臂都 < 20 rad/s），阈值同突跳归因（`scaleretarget/utils/jump_audit.py`）；
+再回到原始 90 fps 看这一步里转得快的那根骨头（上臂 / 手），超过 100 rad/s 才算跳变（`ref_pops`）。真实的快手（甩水、拍腕、
+抖前臂）在原始帧率上平滑、不超过约 80 rad/s；捕捉毛刺是一到三个原始帧里手翻过 120–180°（100–300 rad/s，手臂不动）。
 只扫已解压的片段。一条约 5 秒（单进程）：part 1、2、12 共 3334 条，20 进程 13 分钟。
 
 ```bash
@@ -48,6 +55,7 @@ python scripts/hiphi/survey.py \
   “sit down onto the box”），所以地形、非直立只看 Frame-LU；描述只在去掉 rolling / lying / rise up 之后补查非直立的词；跳跃两者都看。
 - 坐地、跪坐、深蹲靠胯部高度判成「贴地」：Hips 低于 0.55 m 的帧超过 1%。HiPHI 一条约 1 分钟，常有做到一半坐到地上一段再站起来的，这样的片段也进红区。
 - 读不了的片段进红区，原因「骨架不支持」：少数 BVH 是简化骨架，脊柱只有 Spine、Spine1 两节，没有躯干目标跟的 Spine2；3334 条里有 22 条。
+- 参考手臂有任何一帧跳变（第 1 步的两种）的片段进红区，原因「参考数据跳变」：跳变在数据里，转成什么样都跟不了。
 
 ```bash
 python scripts/hiphi/classify.py \

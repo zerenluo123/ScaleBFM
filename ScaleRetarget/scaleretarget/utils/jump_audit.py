@@ -53,6 +53,11 @@ def twist_flips(speeds):
     return (speeds[:, 0] > FLIP_SPIN) & (speeds[:, 1] > FLIP_SPIN) & (speeds[:, 2] < FLIP_STILL)
 
 
+def hand_flips(speeds):
+    """Steps where the hand spins while the upper arm and forearm stay still: a hand flip in the capture."""
+    return (speeds[:, 2] > FLIP_SPIN) & (speeds[:, 0] < FLIP_STILL) & (speeds[:, 1] < FLIP_STILL)
+
+
 def link_track(retargeter, motion, targets):
     """Wrist error (frames, 2 sides) in m, and per step how much faster the elbow / wrist link moves than
     its target and the target speed (frames - 1, 2 sides) in m/s. motion is a formatter dict (xyzw root)."""
