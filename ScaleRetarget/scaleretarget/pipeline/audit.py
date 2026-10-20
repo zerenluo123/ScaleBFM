@@ -25,6 +25,7 @@ LIFT = ["LZ_mt_Joint", "LZ_it_Joint"]
 GROUPS = {
     "pelvis_proxy": "pelvis", "torso_link": "chest",
     "left_shoulder_roll_link": "shoulder", "right_shoulder_roll_link": "shoulder",
+    "left_shoulder_yaw_link": "shoulder", "right_shoulder_yaw_link": "shoulder",
     "left_elbow_link": "elbow", "right_elbow_link": "elbow",
     "left_wrist_yaw_link": "wrist", "right_wrist_yaw_link": "wrist",
 }

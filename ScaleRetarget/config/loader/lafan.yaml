@@ -9,3 +9,5 @@ loader:
   config:
     loader_type: lafan
     data_format: .bvh
+    # In multi_process mode each worker parses its own BVH (~2 s per clip in the producer otherwise).
+    load_in_worker: True

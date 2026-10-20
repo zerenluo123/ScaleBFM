@@ -6,10 +6,7 @@ metrics (scaleretarget/pipeline/workspace.py) per clip, plus the skeleton calibr
 offsets), the frame time, the loader's ground shift and frame turns, and the steps where the reference arm
 pops. Zones are assigned afterwards from these metrics (classify.py).
 
-A pop is a twist flip or a hand flip (scaleretarget/utils/jump_audit.py) at 30 fps whose spinning bone (upper
-arm, hand) turns faster than POP_SPIN at the capture's own rate (90 fps) within the step. Real fast hands
-(shaking off water, flapping, wiggling) stay under ~80 rad/s there and turn smoothly over the native frames;
-capture pops turn the hand 120-180 deg within one to three native frames (100-300 rad/s, the arm still).
+Pops are checked at the capture's own rate, 90 fps (scaleretarget/pipeline/ref_pops.py).
 
     python scripts/hiphi/survey.py --out survey_raw.parquet [--limit N] [--workers 20]
 """
@@ -26,18 +23,15 @@ import yaml
 from scipy.spatial.transform import Rotation as R
 
 from dataset import CORRESPONDENCE, ROOT, read_metadata
+from scaleretarget.pipeline.ref_pops import reference_pops, table_arm_bones
 from scaleretarget.pipeline.workspace import clip_metrics, rotation_offsets
-from scaleretarget.utils.jump_audit import ARM_LINKS, SIDES, bone_speeds, hand_flips, twist_flips
-from scaleretarget.utils.lafan_vendor.extract import read_bvh_multi_channel
-from scaleretarget.utils.lafan_vendor.utils import quat_fk
 
 FPS = 30
 OFFSETS = rotation_offsets(CORRESPONDENCE)
 _TABLE = yaml.safe_load(open(CORRESPONDENCE))["ik_match_table"]
 HIPS, CHEST = _TABLE["pelvis_proxy"][0], _TABLE["torso_link"][0]
 HANDS = ("LeftHand", "RightHand")
-ARM_BONES = [[_TABLE[f"{s}_{link}"][0] for link in ARM_LINKS] for s in SIDES]
-POP_SPIN = 100.0  # rad/s at the native frame rate
+ARM_BONES = table_arm_bones(_TABLE)
 _ctx = {}
 
 
@@ -67,38 +61,6 @@ def _loader():
     return _ctx["loader"]
 
 
-def native_peaks(path, candidates, fps, frame_time):
-    """Fastest native-rate turn (rad/s) of each candidate's bone within its 30 fps step.
-    candidates: (bone, step) pairs."""
-    bvh = read_bvh_multi_channel(path)
-    quats = quat_fk(bvh.quats, bvh.pos, bvh.parents)[0]
-    turn = {}
-    for bone in {b for b, _ in candidates}:
-        q = R.from_quat(quats[:, bvh.bones.index(bone)], scalar_first=True)
-        turn[bone] = (q[:-1].inv() * q[1:]).magnitude() / frame_time
-    peaks = []
-    for bone, s in candidates:
-        n0 = int(np.floor(s / fps / frame_time))
-        n1 = max(min(int(np.ceil((s + 1) / fps / frame_time)), len(turn[bone])), n0 + 1)
-        peaks.append(float(turn[bone][n0:n1].max()))
-    return np.array(peaks)
-
-
-def reference_pops(path, frames, fps, frame_time):
-    """Counts of 30 fps twist flips and hand flips, and of those that are capture pops (see the module doc),
-    with the fastest native turn among them (rad/s, 0 without flips)."""
-    candidates = []
-    counts = {"ref_twist_flips": 0, "ref_hand_flips": 0}
-    for bones in ARM_BONES:
-        speeds = bone_speeds(frames, bones, fps)
-        for key, flips, bone in (("ref_twist_flips", twist_flips, bones[0]), ("ref_hand_flips", hand_flips, bones[2])):
-            steps = np.where(flips(speeds))[0]
-            counts[key] += len(steps)
-            candidates += [(bone, s) for s in steps]
-    peaks = native_peaks(path, candidates, fps, frame_time) if candidates else np.zeros(0)
-    return counts | {"ref_pops": int((peaks > POP_SPIN).sum()), "ref_pop_peak": float(peaks.max(initial=0.0))}
-
-
 def survey_clip(path):
     row = {"path": path}
     try:
@@ -108,7 +70,7 @@ def survey_clip(path):
         rot = lambda b: R.from_quat(np.array([f[b][1] for f in frames]), scalar_first=True)
         hands_z = np.stack([pos(h)[:, 2] for h in HANDS], 1)
         row |= clip_metrics(pos(HIPS), rot(HIPS), rot(CHEST), hands_z, extras["fps"], OFFSETS)
-        row |= reference_pops(path, frames, extras["fps"], row["frame_time"])
+        row |= reference_pops(path, frames, extras["fps"], row["frame_time"], ARM_BONES)
         row |= {
             "turned_frames": ",".join(f"{b}:{k}" for b, k in extras["turned_frames"].items()),
             "ground_shift": float(extras["ground_shift"]), "stands": bool(extras["stands"]), "error": "",

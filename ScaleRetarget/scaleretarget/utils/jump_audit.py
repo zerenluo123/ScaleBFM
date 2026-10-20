@@ -22,8 +22,10 @@ from scipy.spatial.transform import Rotation as R
 from scaleretarget.utils.arm_jumps import ARM_JOINTS, JUMP_SKIP_FRAMES, JUMP_SPEED
 
 SIDES = ("left", "right")
-# Robot links whose targets are the human upper arm, forearm and hand.
+# Robot links whose targets are the human upper arm, forearm and hand. The GMR tables (e.g. LAFAN) put
+# the upper arm on shoulder_yaw_link instead.
 ARM_LINKS = ("shoulder_roll_link", "elbow_link", "wrist_yaw_link")
+UPPER_ARM_LINKS = ("shoulder_roll_link", "shoulder_yaw_link")
 
 FLIP_SPIN, FLIP_STILL = 40.0, 20.0  # rad/s: upper arm and forearm above, hand below
 TELEPORT = 8.0  # m/s of an elbow / wrist target
@@ -34,9 +36,16 @@ REF_FAILS_CM = 20.0  # median wrist error of the reference retarget over the cli
 CAUSES = ("ref_fails", "ref_bug", "joint_limits", "wrist_cap", "fast_motion")
 
 
+def arm_links(table, side):
+    """The upper arm, forearm and hand links of one side in an ik_match_table."""
+    upper = next(f"{side}_{link}" for link in UPPER_ARM_LINKS if f"{side}_{link}" in table)
+    return [upper, *(f"{side}_{link}" for link in ARM_LINKS[1:])]
+
+
 def arm_bones(retargeter):
     """Human bones targeted by the upper arm, forearm and hand links, per side."""
-    return {s: [retargeter.ik_match_table[f"{s}_{link}"][0] for link in ARM_LINKS] for s in SIDES}
+    table = retargeter.ik_match_table
+    return {s: [table[link][0] for link in arm_links(table, s)] for s in SIDES}
 
 
 def bone_speeds(frames, bones, fps):

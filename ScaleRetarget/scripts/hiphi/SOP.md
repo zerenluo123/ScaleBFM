@@ -145,6 +145,7 @@ cd $D/bones-seed && tar -xzf soma_uniform.tar.gz && tar -xzf g1.tar.gz
 export BFM=~/humanoid_wbc/bfm_datasets
 export BONES_SEED=$BFM/bones-seed BONES_SEED_OUT=$BFM/bone-seed_retarget
 export HIPHI=$BFM/HiPHI HIPHI_UNPACKED=$BFM/HiPHI_unpacked HIPHI_OUT=$BFM/HiPHI_retarget
+export LAFAN=$BFM/lafan1 LAFAN_OUT=$BFM/lafan1_retarget
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
 source ~/miniconda3/etc/profile.d/conda.sh && conda activate scaleretarget
 cd ~/humanoid_wbc/ScaleBFM/ScaleRetarget
@@ -179,7 +180,7 @@ python scripts/hiphi/browse.py --version v1 --cache_only
 
 第 4–6 步在服务器上照常跑（同样先设路径），`--workers` 可以开到 64。
 
-### 常用命令（两个数据集通用）
+### 常用命令（各数据集通用）
 
 服务器上长任务都放 tmux 里，断网、关终端不影响：
 
@@ -198,12 +199,13 @@ tmux attach -t rt_hiphi           # 回到会话
 ```bash
 VERSION=v2 NOTE="说明这一版改了什么" NUM_WORKERS=64 scripts/hiphi/retarget.sh
 VERSION=v2 NOTE="说明这一版改了什么" NUM_WORKERS=64 scripts/bones_seed/retarget.sh
+VERSION=v1 NOTE="说明这一版改了什么" NUM_WORKERS=64 scripts/lafan/retarget.sh
 ```
 
 转完以后的检查和剔除（第 4–6 步）。先设好是哪个数据集、哪个版本，下面几行原样复制：
 
 ```bash
-D=hiphi OUT=$HIPHI_OUT V=v2               # BONES-SEED：D=bones_seed OUT=$BONES_SEED_OUT V=v1
+D=hiphi OUT=$HIPHI_OUT V=v2               # BONES-SEED：D=bones_seed OUT=$BONES_SEED_OUT V=v1；LAFAN：D=lafan OUT=$LAFAN_OUT V=v1
 python scripts/$D/audit.py --run_dir $OUT/$V --out_dir $OUT/$V/audit --workers 64
 python scripts/$D/jump_audit.py flips --workers 64          # 只看参考数据；loader 没改过可以跳过
 python scripts/$D/jump_audit.py segments --version $V --workers 64
@@ -226,6 +228,7 @@ mkdir -p ~/mnt/hkeai && sshfs hkeai-test:/home/luozr ~/mnt/hkeai -o reconnect,Se
 R=~/mnt/hkeai/humanoid_wbc/bfm_datasets
 HIPHI=$R/HiPHI HIPHI_UNPACKED=$R/HiPHI_unpacked HIPHI_OUT=$R/HiPHI_retarget python scripts/hiphi/browse.py --version v2 --cache_only
 BONES_SEED=$R/bones-seed BONES_SEED_OUT=$R/bone-seed_retarget python scripts/bones_seed/browse.py --version v1 --cache_only
+LAFAN=$R/lafan1 LAFAN_OUT=$R/lafan1_retarget python scripts/lafan/browse.py --version v1 --cache_only
 fusermount -u ~/mnt/hkeai         # 不用了卸载
 ```
 
