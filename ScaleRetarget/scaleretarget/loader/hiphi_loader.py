@@ -75,9 +75,13 @@ def planted_ankle_height(positions, bones, leg_length, min_frames):
     return np.percentile(ankle[standing, 2], 10) if standing.sum() >= min_frames else None
 
 
-# Bones whose children all lie on their up axis (y), so that a turn about it moves no joint.
+# Bones whose children all lie on their up axis (y), so that a turn about it moves no joint; a foot's one
+# child, the toe, leaves it free to turn about the ankle-to-toe axis.
 TRUNK = ("Spine", "Spine1", "Spine2", "Spine3", "Neck", "Neck1", "Head")
+LEGS = ("LeftUpLeg", "LeftLeg", "RightUpLeg", "RightLeg")
+FEET = ("LeftFoot", "RightFoot")
 ARMS = ("LeftArm", "RightArm")
+Y = np.array([0.0, 1.0, 0.0])
 
 
 def quarter_turns(angle):
@@ -85,20 +89,38 @@ def quarter_turns(angle):
     return int(np.round(angle / (np.pi / 2))) % 4
 
 
+def half_turns(angle):
+    """A half turn (2 quarter turns) for an angle (rad) beyond 90 deg either way, else 0."""
+    return 2 * int(abs(angle) > np.pi / 2)
+
+
+def angle_about(axis, v):
+    """Angle (rad) of v about the unit axis, from the side of it +y lies on."""
+    e = Y - (Y @ axis) * axis
+    e /= np.linalg.norm(e)
+    return np.arctan2(np.cross(e, v) @ axis, e @ v)
+
+
 def canonical_frames(bvh_data):
     """Turn the bone frames that some HiPHI captures set a quarter or half turn off the others, about axes
     the joint positions do not fix, back to the common convention, in place. Returns {bone: quarter turns}.
 
-    In those captures the trunk and neck bones (TRUNK) are half a turn off about their up axis: the shoulder
-    line lies along -x of their frames instead of +x (Hips and Spine4 are not, so Spine, Spine4 and Neck show
-    ~180 deg local rotations), and the torso target, on Spine2, faces backwards. Over the dataset the shoulder
-    line (summed over the frames) lies within 90 deg of +x of a trunk bone (a twisted spine, a turned head) or
-    within 30 deg of -x, so a bone beyond 90 deg is turned by half a turn. The same captures, and only those,
-    set the upper arms a quarter turn off about their own axis: the elbow bends towards +y of the arm frame
-    instead of +z. That turn is the elbow bend direction summed over the frames (weighted by how far the elbow
-    is bent), rounded to the nearest quarter turn; in the other captures it is left alone, as it is either
-    that of a twisted upper arm or, for an arm kept straight, noise. The children take the inverse turn in
-    their local rotation and translation, so every joint position and every other bone's frame stays the same.
+    Those captures (all of performers A116-A132) set the trunk and neck bones (TRUNK) half a turn off about
+    their up axis: the shoulder line lies along -x of their frames instead of +x (Hips and Spine4 are not, so
+    Spine, Spine4 and Neck show ~180 deg local rotations), and the torso target, on Spine2, faces backwards.
+    The thighs and shins (LEGS) are half a turn off about theirs (the hip line along -x), so that the knee
+    targets point backwards, the feet (FEET) half a turn off about the ankle-to-toe axis (the shin on the -y
+    side of it), and the upper arms a quarter turn off about theirs (the elbow bends towards +y of the arm
+    frame instead of +z).
+
+    Half turns: over the dataset, summed over the frames, the shoulder line in a trunk bone lies within 90 deg
+    of +x (a twisted spine, a turned head) or within 30 deg of -x, the hip line in a thigh or shin within 60
+    deg of +x (hip and knee rotation; the knee bends about it) or near -x, and the shin in a foot within 90 deg
+    of the +y side (ankle inversion) or within 60 deg of the -y side, so a bone beyond 90 deg is turned by half
+    a turn. Upper arms: the elbow bend direction summed over the frames (weighted by how far the elbow is
+    bent), rounded to the nearest quarter turn, only where the trunk is turned; elsewhere it is either that of
+    a twisted upper arm or, for an arm kept straight, noise. The children take the inverse turn in their local
+    rotation and translation, so every joint position and every other bone's frame stays the same.
     """
     index = {name: i for i, name in enumerate(bvh_data.bones)}
     quats, pos = quat_fk(bvh_data.quats, bvh_data.pos, bvh_data.parents)
@@ -108,7 +130,7 @@ def canonical_frames(bvh_data):
     shoulders = at("LeftArm") - at("RightArm")
     for bone in (b for b in TRUNK if b in index):
         v = frame(bone).inv().apply(shoulders).sum(0)
-        turns[bone] = (2 * int(abs(np.arctan2(-v[2], v[0])) > np.pi / 2), np.array([0.0, 1.0, 0.0]))
+        turns[bone] = (half_turns(np.arctan2(-v[2], v[0])), Y)
     if any(k for k, _ in turns.values()):
         for bone in ARMS:
             side = bone.removesuffix("Arm")
@@ -118,6 +140,16 @@ def canonical_frames(bvh_data):
             bend = lower - np.sum(lower * upper, axis=1, keepdims=True) * upper
             v = frame(bone).inv().apply(bend).sum(0)
             turns[bone] = (-quarter_turns(np.arctan2(v[1], v[2])) % 4, np.array([1.0, 0.0, 0.0]))
+    hips = at("LeftUpLeg") - at("RightUpLeg")
+    for bone in LEGS:
+        v = frame(bone).inv().apply(hips).sum(0)
+        turns[bone] = (half_turns(np.arctan2(-v[2], v[0])), Y)
+    for bone in FEET:
+        side = bone.removesuffix("Foot")
+        toe = bvh_data.pos[0, index[f"{side}ToeBase"]]
+        axis = toe / np.linalg.norm(toe)
+        v = frame(bone).inv().apply(at(f"{side}Leg") - at(bone)).sum(0)
+        turns[bone] = (half_turns(angle_about(axis, v)), axis)
     children = {i: [c for c, p in enumerate(bvh_data.parents) if p == i] for i in range(len(bvh_data.bones))}
     done = {}
     for bone, (k, axis) in turns.items():
