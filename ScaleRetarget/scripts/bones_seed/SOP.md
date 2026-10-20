@@ -136,3 +136,5 @@ VERSION=v1 NOTE="first run" NUM_WORKERS=64 scripts/bones_seed/retarget.sh    # �
 R=~/mnt/hkeai/humanoid_wbc/bfm_datasets
 BONES_SEED=$R/bones-seed BONES_SEED_OUT=$R/bone-seed_retarget python scripts/bones_seed/browse.py --version v1 --cache_only
 ```
+
+tmux、转完后的检查和剔除、本机挂载的复制即用命令见 `scripts/hiphi/SOP.md` 第 7 节「常用命令」。

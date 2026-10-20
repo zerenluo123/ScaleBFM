@@ -179,6 +179,58 @@ python scripts/hiphi/browse.py --version v1 --cache_only
 
 第 4–6 步在服务器上照常跑（同样先设路径），`--workers` 可以开到 64。
 
+### 常用命令（两个数据集通用）
+
+服务器上长任务都放 tmux 里，断网、关终端不影响：
+
+```bash
+ssh hkeai-test
+tmux new -s rt_hiphi              # 新开会话；已经有了就 tmux attach -t rt_hiphi
+source ~/humanoid_wbc/bfm_env.sh
+# ……在这里跑命令……
+# Ctrl-b 再按 d：离开会话，任务继续跑；Ctrl-b [ 往上翻输出，q 退出
+tmux ls                           # 有哪些会话
+tmux attach -t rt_hiphi           # 回到会话
+```
+
+转换（第 3 步，`VERSION` 换成下一个编号）：
+
+```bash
+VERSION=v2 NOTE="说明这一版改了什么" NUM_WORKERS=64 scripts/hiphi/retarget.sh
+VERSION=v2 NOTE="说明这一版改了什么" NUM_WORKERS=64 scripts/bones_seed/retarget.sh
+```
+
+转完以后的检查和剔除（第 4–6 步）。先设好是哪个数据集、哪个版本，下面几行原样复制：
+
+```bash
+D=hiphi OUT=$HIPHI_OUT V=v2               # BONES-SEED：D=bones_seed OUT=$BONES_SEED_OUT V=v1
+python scripts/$D/audit.py --run_dir $OUT/$V --out_dir $OUT/$V/audit --workers 64
+python scripts/$D/jump_audit.py flips --workers 64          # 只看参考数据；loader 没改过可以跳过
+python scripts/$D/jump_audit.py segments --version $V --workers 64
+python scripts/$D/exclude_ood.py --version $V               # 只打印名单，不动文件
+```
+
+看过名单（面板里也能逐条看）再移动，移完更新帧缓存，本机面板才看得到：
+
+```bash
+python scripts/$D/exclude_ood.py --version $V --apply
+python scripts/$D/browse.py --build_cache $V
+```
+
+`--apply` 重跑是安全的：已经在 OOD 的跳过。但面板里手动恢复的片段没有记录，再 `--apply` 会被重新剔除。
+
+本机看面板（在 `ScaleRetarget` 目录下；每条命令一行，换行要在行尾加 `\`）：
+
+```bash
+mkdir -p ~/mnt/hkeai && sshfs hkeai-test:/home/luozr ~/mnt/hkeai -o reconnect,ServerAliveInterval=15,max_read=1048576,idmap=user
+R=~/mnt/hkeai/humanoid_wbc/bfm_datasets
+HIPHI=$R/HiPHI HIPHI_UNPACKED=$R/HiPHI_unpacked HIPHI_OUT=$R/HiPHI_retarget python scripts/hiphi/browse.py --version v2 --cache_only
+BONES_SEED=$R/bones-seed BONES_SEED_OUT=$R/bone-seed_retarget python scripts/bones_seed/browse.py --version v1 --cache_only
+fusermount -u ~/mnt/hkeai         # 不用了卸载
+```
+
+面板里右键剔除 / 恢复单条，直接改挂载上的文件，不用再跑别的。整批按规则剔除在服务器上跑 `exclude_ood.py`。
+
 ## 8. 重新标定 loader 和躯干目标的数
 
 `config/loader/hiphi.yaml` 里的四组数，以及两张 HiPHI 对应表里 torso_link（Spine2）那一行的旋转和位置偏移，都可以重测，
