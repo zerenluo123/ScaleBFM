@@ -1,4 +1,4 @@
-"""Pops of the reference arm in a BVH: the steps where the motion data itself jumps.
+"""Pops of the reference arm: the steps where the motion data itself jumps.
 
 A pop is a twist flip or a hand flip (scaleretarget/utils/jump_audit.py) at the retarget rate whose spinning
 bone (upper arm, hand) turns faster than POP_SPIN at the capture's own rate within the step. Real fast hands
@@ -21,14 +21,24 @@ def table_arm_bones(table):
     return [[table[link][0] for link in arm_links(table, s)] for s in SIDES]
 
 
-def native_peaks(path, candidates, fps, frame_time):
-    """Fastest native-rate turn (rad/s) of each candidate's bone within its step at fps.
-    candidates: (bone, step) pairs."""
+def bvh_rotations(path):
+    """Global rotation of a BVH bone, by name, on every frame of the file."""
     bvh = read_bvh_multi_channel(path)
     quats = quat_fk(bvh.quats, bvh.pos, bvh.parents)[0]
+    return lambda bone: R.from_quat(quats[:, bvh.bones.index(bone)], scalar_first=True)
+
+
+def frame_rotations(frames):
+    """Global rotation of a bone, by name, on every frame of a loader's frame list."""
+    return lambda bone: R.from_quat(np.array([f[bone][1] for f in frames]), scalar_first=True)
+
+
+def native_peaks(rotations, candidates, fps, frame_time):
+    """Fastest native-rate turn (rad/s) of each candidate's bone within its step at fps.
+    rotations: bone -> Rotation per native frame (bvh_rotations, frame_rotations); candidates: (bone, step) pairs."""
     turn = {}
     for bone in {b for b, _ in candidates}:
-        q = R.from_quat(quats[:, bvh.bones.index(bone)], scalar_first=True)
+        q = rotations(bone)
         turn[bone] = (q[:-1].inv() * q[1:]).magnitude() / frame_time
     peaks = []
     for bone, s in candidates:
@@ -38,9 +48,11 @@ def native_peaks(path, candidates, fps, frame_time):
     return np.array(peaks)
 
 
-def reference_pops(path, frames, fps, frame_time, arm_bones):
+def reference_pops(native, frames, fps, frame_time, arm_bones):
     """Counts of twist flips and hand flips at fps, and of those that are capture pops (see the module doc),
-    with the fastest native turn among them (rad/s, 0 without flips). arm_bones: table_arm_bones."""
+    with the fastest native turn among them (rad/s, 0 without flips). native: called without arguments
+    only when there are flips, returns the native-rate rotations (e.g. lambda: bvh_rotations(path));
+    arm_bones: table_arm_bones."""
     candidates = []
     counts = {"ref_twist_flips": 0, "ref_hand_flips": 0}
     for bones in arm_bones:
@@ -49,5 +61,5 @@ def reference_pops(path, frames, fps, frame_time, arm_bones):
             steps = np.where(flips(speeds))[0]
             counts[key] += len(steps)
             candidates += [(bone, s) for s in steps]
-    peaks = native_peaks(path, candidates, fps, frame_time) if candidates else np.zeros(0)
+    peaks = native_peaks(native(), candidates, fps, frame_time) if candidates else np.zeros(0)
     return counts | {"ref_pops": int((peaks > POP_SPIN).sum()), "ref_pop_peak": float(peaks.max(initial=0.0))}

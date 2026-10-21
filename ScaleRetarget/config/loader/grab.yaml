@@ -11,9 +11,13 @@ loader:
     data_format: .pkl
 
     body_model_path: assets/body_models
+    # In multi_process mode each worker runs SMPL-X on its own clips (and fits the shape once).
+    load_in_worker: True
     
     exclude_content: []
 
     use_optimized_shape: True # When using optimized shape, the scale table would be disabled
     optim_iterations: 6000
-    optim_joint_matches: config/correspondence/optim_shape/${loader.config.loader_type}_to_${robot.robot_type}.yaml
+    # The robot the shape is fitted to; unitree_g1d.yaml points at the G1.
+    shape_robot: ${oc.select:robot.smplx_shape_robot,${robot}}
+    optim_joint_matches: config/correspondence/optim_shape/${loader.config.loader_type}_to_${loader.config.shape_robot.robot_type}.yaml

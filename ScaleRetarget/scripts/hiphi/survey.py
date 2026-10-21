@@ -23,7 +23,7 @@ import yaml
 from scipy.spatial.transform import Rotation as R
 
 from dataset import CORRESPONDENCE, ROOT, read_metadata
-from scaleretarget.pipeline.ref_pops import reference_pops, table_arm_bones
+from scaleretarget.pipeline.ref_pops import bvh_rotations, reference_pops, table_arm_bones
 from scaleretarget.pipeline.workspace import clip_metrics, rotation_offsets
 
 FPS = 30
@@ -70,7 +70,7 @@ def survey_clip(path):
         rot = lambda b: R.from_quat(np.array([f[b][1] for f in frames]), scalar_first=True)
         hands_z = np.stack([pos(h)[:, 2] for h in HANDS], 1)
         row |= clip_metrics(pos(HIPS), rot(HIPS), rot(CHEST), hands_z, extras["fps"], OFFSETS)
-        row |= reference_pops(path, frames, extras["fps"], row["frame_time"], ARM_BONES)
+        row |= reference_pops(lambda: bvh_rotations(path), frames, extras["fps"], row["frame_time"], ARM_BONES)
         row |= {
             "turned_frames": ",".join(f"{b}:{k}" for b, k in extras["turned_frames"].items()),
             "ground_shift": float(extras["ground_shift"]), "stands": bool(extras["stands"]), "error": "",

@@ -18,6 +18,7 @@ class Dataset:
     robot = "unitree_g1d"  # robot of the batch runs
     source = ""  # read-only root
     bvh_root = ""  # data_path of the batch runs
+    suffix = ".bvh"  # of the clip files under bvh_root
     out = ""
     zones_file = "zones.parquet"
     # Config files copied into each version folder; a version is resumed only while they are unchanged.
@@ -40,7 +41,7 @@ class Dataset:
         return os.path.join(self.survey_dir, "ref_twist_flips.csv")
 
     def bvh_path(self, rel):
-        return os.path.join(self.bvh_root, rel + ".bvh")
+        return os.path.join(self.bvh_root, rel + self.suffix)
 
     def twin(self, rel):
         """The mirrored clip of rel, or the original of a mirrored one."""

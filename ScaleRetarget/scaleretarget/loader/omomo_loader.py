@@ -1,12 +1,10 @@
-import os
 import numpy as np
 import torch
-from natsort import natsorted
 from scipy.spatial.transform import Rotation as R
 from smplx.joint_names import JOINT_NAMES
 from loguru import logger
 
-from scaleretarget.loader.base_loader import BaseLoader, Mode
+from scaleretarget.loader.base_loader import BaseLoader
 from scaleretarget.utils.resampling import resample_smplx_motion
 from scaleretarget.utils.shape_optimizer import optimize_smplx_shape
 from scaleretarget.utils.smplx import SmplxModelCache, run_smplx_inference
@@ -17,37 +15,6 @@ class OmomoLoader(BaseLoader):
         super().__init__(config)
         self.body_models = SmplxModelCache(self.config.body_model_path)
         self._optimize_shape()
-
-    def load(self, data_path):
-        self.data_path = data_path
-
-        if os.path.isdir(self.data_path):
-            self.mode = Mode.dir
-
-            self.data_list = []
-            for dir_path, _, filenames in os.walk(self.data_path):
-                for filename in natsorted(filenames):
-                    if filename.endswith((".pkl", ".npz")):
-                        self.data_list.append(os.path.join(dir_path, filename))
-            
-            if self.config.exclude_content:
-                logger.info(f"[Loader] Removing motions with keywords: {self.config.exclude_content}")
-                self.data_list = [
-                    path for path in self.data_list
-                    if not any(content in path for content in self.config.exclude_content)
-                ]
-
-            self.data_num = len(self.data_list)
-        elif os.path.isfile(self.data_path):
-            suffix = os.path.splitext(self.data_path)[-1]
-            assert suffix == self.format, f"You are using the data loader for {self.format} format but the data you give is {suffix} format!"
-            self.mode = Mode.file
-            self.data_list = [self.data_path]
-            self.data_num = 1
-        else:
-            raise Exception(f"Check your data path: {self.data_path}")
-        
-        logger.info(f"[Loader] Total number of motions: {self.data_num}")
 
     def _load_sample(self, sample_path):
         smplx_data = np.load(sample_path, allow_pickle=True)    
@@ -123,8 +90,8 @@ class OmomoLoader(BaseLoader):
         if self.use_optimized_shape:
             logger.info('[Loader] Using optimized shape for retargeting.')
             self.shape = optimize_smplx_shape(
-                robot_type=self.config.robot.robot_type,
-                robot_xml_path=self.config.robot.robot_xml_path,
+                robot_type=self.config.shape_robot.robot_type,
+                robot_xml_path=self.config.shape_robot.robot_xml_path,
                 body_model_path=self.config.body_model_path,
                 optim_joint_matches=self.config.optim_joint_matches,
                 optim_iterations=self.config.optim_iterations,

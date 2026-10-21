@@ -30,6 +30,10 @@ class BaseLoader:
                 self.data_list = self._read_file_lists(file_list)
             else:
                 self.data_list = glob.glob(f"{self.data_path}/**/*{self.format}", recursive=True)
+            exclude = self.config.get('exclude_content', None) or []
+            if exclude:
+                logger.info(f"[Loader] Removing motions with keywords: {list(exclude)}")
+                self.data_list = [p for p in self.data_list if not any(c in p for c in exclude)]
             self.data_num = len(self.data_list)
         elif os.path.isfile(self.data_path):
             suffix = os.path.splitext(self.data_path)[-1]

@@ -9,6 +9,12 @@ robot:
 
   viewer_cam_dist: 2.5
 
+  # SMPL-X loaders fit the body shape to a robot's rest pose. G1-D has the G1 upper body and no legs,
+  # so the shape is fitted to the G1; the root keeps the clip's own height (root_keeps_human_scale).
+  smplx_shape_robot:
+    robot_type: unitree_g1
+    robot_xml_path: assets/unitree_g1/g1_mocap_29dof.xml
+
   # The whole human is shifted vertically so the root height follows a low-passed, speed-limited
   # curve the lift can track. max_speed is the column limit in unitree_sdk2 (AgvClient::HeightAdjust,
   # 76.5 mm/s); the URDF allows 0.05 m/s per stage and the product page says about 60 mm/s.

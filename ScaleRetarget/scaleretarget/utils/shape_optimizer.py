@@ -12,6 +12,7 @@ from hydra.core.hydra_config import HydraConfig
 
 from scaleretarget.utils.kinematic_model.kinematics_model import KinematicsModel
 from scaleretarget.utils.lafan_vendor.extract import read_bvh, read_bvh_multi_channel
+from scaleretarget.utils.smplx import NUM_BETAS
 from scaleretarget.utils.torch_utils import quat_apply, quat_mul
 
 
@@ -59,7 +60,8 @@ def optimize_smplx_shape(robot_type,
         body_model_path,
         "smplx",
         gender="neutral",
-        use_pca=False
+        use_pca=False,
+        num_betas=NUM_BETAS,
     ).to(kinematic_model_device)
 
     robot_dof_names = kinematic_model.dof_names

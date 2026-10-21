@@ -189,6 +189,10 @@ class GmrRetargeter(BaseRetargeter):
             for key in self.human_scale_table_orig.keys():
                 self.human_scale_table[key] = self.human_scale_table_orig[key] * ratio
 
+        # The lift of a robot like g1d follows the human root at its own height, whatever the body size.
+        if self.ik_config.get("root_keeps_human_scale", False):
+            self.human_scale_table[self.human_root_name] = self.human_scale_table_orig[self.human_root_name]
+
     def prepare_frames(self, frames):
         if self.root_height_filter is not None:
             frames = filter_root_height(
