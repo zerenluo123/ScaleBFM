@@ -18,6 +18,10 @@ loader:
     # Shape-only files next to each sequence.
     exclude_content: [_stagei.npz]
 
+    # Subsets whose trans is not on the floor (DFaust's soles sit about 0.6 m below z = 0); their clips are
+    # lifted so the lowest point of the clip's own body over the clip is at z = 0. The others are on the floor.
+    ground_subsets: [DFaust]
+
     use_optimized_shape: True # When using optimized shape, the scale table would be disabled
     optim_iterations: 6000
     # The robot the shape is fitted to; unitree_g1d.yaml points at the G1.

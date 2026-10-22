@@ -48,8 +48,9 @@ class Amass(Dataset):
         df["group"] = df["category"] = df.subset
         df["actor"] = df["session"] = df.subset + "/" + df.subject
         df["description"] = df.words
-        df["seconds"] = df.duration_sec.round(2)
-        df["span_expected"] = (df.frame_count - 1) * df.frame_time
+        # A clip whose npz cannot be read has no header; it is red (骨架不支持) and never converted.
+        df["seconds"] = df.duration_sec.fillna(0).round(2)
+        df["span_expected"] = ((df.frame_count - 1) * df.frame_time).fillna(0)
         return df
 
 

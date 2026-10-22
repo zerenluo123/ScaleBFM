@@ -42,3 +42,16 @@ def run_smplx_inference(body_model, chunk=CHUNK_FRAMES, **kwargs):
         parts.append((out.global_orient, out.full_pose, out.joints))
     global_orient, full_pose, joints = (torch.cat(p) for p in zip(*parts))
     return SimpleNamespace(global_orient=global_orient, full_pose=full_pose, joints=joints)
+
+
+@torch.inference_mode()
+def lowest_vertex_z(body_model, chunk=CHUNK_FRAMES, **kwargs):
+    """Lowest z of the posed mesh over all frames, computed chunk frames at a time."""
+    num_frames = kwargs["global_orient"].shape[0]
+    kwargs.setdefault("expression", torch.zeros(num_frames, body_model.num_expression_coeffs))
+    lowest = float("inf")
+    for start in range(0, num_frames, chunk):
+        sub = {k: v[start:start + chunk] if torch.is_tensor(v) and v.shape[0] == num_frames and num_frames > 1 else v
+               for k, v in kwargs.items()}
+        lowest = min(lowest, body_model(**sub).vertices[..., 2].min().item())
+    return lowest

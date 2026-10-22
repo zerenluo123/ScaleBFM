@@ -7,7 +7,7 @@ from loguru import logger
 from scaleretarget.loader.base_loader import BaseLoader
 from scaleretarget.utils.resampling import resample_smplx_motion
 from scaleretarget.utils.shape_optimizer import cached_smplx_shape
-from scaleretarget.utils.smplx import SmplxModelCache, run_smplx_inference
+from scaleretarget.utils.smplx import SmplxModelCache, lowest_vertex_z, run_smplx_inference
 
 class AmassLoader(BaseLoader):
 
@@ -19,6 +19,11 @@ class AmassLoader(BaseLoader):
     def _load_sample(self, sample_path):
         smplx_data = np.load(sample_path, allow_pickle=True)    
         num_frames = smplx_data['pose_body'].shape[0]
+        trans = torch.tensor(smplx_data["trans"]).float()
+        ground_shift = 0.0
+        if any(f"/{subset}/" in sample_path for subset in self.config.get("ground_subsets", [])):
+            ground_shift = -self._lowest_vertex_z(smplx_data, trans, num_frames)
+            trans[:, 2] += ground_shift
 
         if self.use_optimized_shape:
             betas = self.shape
@@ -31,7 +36,7 @@ class AmassLoader(BaseLoader):
             betas=betas, # (16,)
             global_orient=torch.tensor(smplx_data["root_orient"]).float(), # (N, 3)
             body_pose=torch.tensor(smplx_data["pose_body"]).float(), # (N, 63)
-            transl=torch.tensor(smplx_data["trans"]).float(), # (N, 3)
+            transl=trans, # (N, 3)
             left_hand_pose=torch.zeros(num_frames, 45).float(),
             right_hand_pose=torch.zeros(num_frames, 45).float(),
             jaw_pose=torch.zeros(num_frames, 3).float(),
@@ -81,10 +86,26 @@ class AmassLoader(BaseLoader):
         extras = {
             "fps": aligned_fps,
             "actual_human_height": human_height,
-            "disable_scale_table": self.use_optimized_shape
+            "disable_scale_table": self.use_optimized_shape,
+            "ground_shift": ground_shift,
         }
 
         return frames, extras
+
+    def _lowest_vertex_z(self, smplx_data, trans, num_frames):
+        """Lowest point of the clip's own body (its betas and gender) over the whole clip."""
+        return lowest_vertex_z(
+            self.body_models.get(smplx_data['gender']),
+            betas=torch.tensor(smplx_data["betas"]).float().view(1, -1),
+            global_orient=torch.tensor(smplx_data["root_orient"]).float(),
+            body_pose=torch.tensor(smplx_data["pose_body"]).float(),
+            transl=trans,
+            left_hand_pose=torch.zeros(num_frames, 45).float(),
+            right_hand_pose=torch.zeros(num_frames, 45).float(),
+            jaw_pose=torch.zeros(num_frames, 3).float(),
+            leye_pose=torch.zeros(num_frames, 3).float(),
+            reye_pose=torch.zeros(num_frames, 3).float(),
+        )
     
     def _optimize_shape(self):
         self.use_optimized_shape = self.config.use_optimized_shape
