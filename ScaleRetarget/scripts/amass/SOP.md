@@ -11,7 +11,9 @@
   「子数据集」一列和「类别」都是子集（CMU、KIT……）。每个序列旁边的 `_stagei.npz` 只有体型，loader 跳过（`exclude_content`）。
 - 采集帧率按子集不同（60–250 fps），参考跳变按各自的原始帧率比较。
 - 没有文字。文字规则读受试者文件夹名和文件名拆成的词，有的子集写了动作（ACCAD、KIT、EyesJapanDataset……），CMU 等只有编号，
-  这些只靠胯部高度、俯仰、速度分区。
+  这些只靠胯部高度、俯仰、速度分区。站上高处靠「Hips 连续 1 秒以上高于升降顶端」进地形（CMU 的不平地面、攀爬，KIT/912 等）；
+  EKUT 的名字是动作代码，`beam`/`beamn`（架高的平衡木）、`slp`/`slpd`（踏上台子）、`wsu*`/`wsd*`（上下楼梯）按地形算
+  （`classify.py` 的 `EKUT_TERRAIN`），它的推、走路几条留着。
 
 ## 0. 解压
 
@@ -44,3 +46,11 @@ python scripts/$D/browse.py --build_cache $V
 ```
 
 `jump_audit.py flips` 按子集筛用 `--subsets CMU KIT`。
+
+服务器 hkeai-test 是共享的 k8s 容器，别人的进程多时总线程数逼近 pod 的上限，检查步骤开 16 个进程会 fork 失败
+（`Resource temporarily unavailable`，`jump_audit.py segments` 报 `BrokenProcessPool`），用 `--workers 8`。
+
+2026-10 v1（5c89f05）的结果：共 15927 条 56.83 h，绿 7967 / 25.64 h，黄 5162 / 17.41 h，红 2798 / 13.78 h（贴地 4.56 h、
+参考数据跳变 3.36 h、坐跪 2.54 h、地形 1.49 h、非直立 1.07 h、跳跃 0.75 h）。转了 13375 条，没有超限位，参考翻转 0 条，手腕误差
+中位 4.8 cm。OOD 927 条 5.46 h：突跳 683 条 4.63 h（卡在关节限位 258、动作太快 302、转腕上限 67、参考跳变 40、标准 G1 也转不好
+16，集中在 BMLrub 和 DanceDB），转完后加了站上高处的地形规则又移进 244 条 0.83 h。最终 12448 条 38.52 h。

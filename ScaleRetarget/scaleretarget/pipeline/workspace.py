@@ -1,7 +1,8 @@
 """g1d workspace check of a human motion, per clip, and the red / yellow / green zones built on it.
 
-red     not usable on g1d: non-upright (by text or a torso flipped over), airborne/terrain, down near the
-        floor on any frame, or seated / kneeling / crouched (by text or the hips low most of the clip)
+red     not usable on g1d: non-upright (by text or a torso flipped over), airborne, terrain (by text or the
+        hips held above the lift top), down near the floor on any frame, or seated / kneeling / crouched
+        (by text or the hips low most of the clip)
 yellow  usable but partly outside the g1d workspace (lift stroke, lean-back, base speed)
 green   inside the workspace on (almost) every frame
 
@@ -43,6 +44,8 @@ OUT_WS_FRAC = 0.01
 # Sitting on a chair keeps the Hips at 0.55-0.65 m, so a seated clip has its median below SEATED_P50_Z;
 # picking something up from the floor only dips there.
 SEATED_P50_Z = 0.70
+# A jump keeps the Hips above the lift top for well under a second; longer, the person stands on something.
+TERRAIN_RUN_S = 1.0
 # Deep forward bends stop near 140 deg; flips, cartwheels and handsprings pass through 150-180.
 FLIP_PITCH_DEG = 150.0
 BACK_ARCH_DEG = -45.0
@@ -80,6 +83,13 @@ def frac(mask):
     return float(np.mean(mask)) if mask.size else 0.0
 
 
+def longest_run(mask):
+    """Length of the longest stretch of consecutive True in a boolean array."""
+    edges = np.diff(np.concatenate([[0], mask.astype(np.int8), [0]]))
+    starts, ends = np.flatnonzero(edges == 1), np.flatnonzero(edges == -1)
+    return int((ends - starts).max()) if starts.size else 0
+
+
 def clip_metrics(hips, hips_rot, chest_rot, hands_z, fps, offsets):
     """Workspace metrics of one clip. hips (T, 3) and hands_z (T, 2) in meters, hips_rot / chest_rot
     Rotations of the bones the pelvis_proxy / torso_link targets follow, offsets their rotation offsets."""
@@ -104,6 +114,7 @@ def clip_metrics(hips, hips_rot, chest_rot, hands_z, fps, offsets):
         "hips_z_max": float(hz.max()),
         "frac_lift_low": frac(lift_low),
         "frac_lift_high": frac(lift_high),
+        "lift_high_run_s": longest_run(lift_high) / fps,
         "frac_floor": frac(hz < FLOOR_HIPS_Z),
         "pitch_min": float(pitch.min()),
         "pitch_max": float(pitch.max()),
@@ -141,6 +152,7 @@ def assign_zones(df, upright_text, terrain_text, jump_text=None, seated_text=Non
     jump = jump_text.str.contains(JUMP, case=False, regex=True) & out_ws
     zone[jump], reason[jump] = "red", "跳跃（出工作空间）"
     terrain = terrain_text.str.contains(TERRAIN, case=False, regex=True)
+    terrain |= df.lift_high_run_s >= TERRAIN_RUN_S
     zone[terrain], reason[terrain] = "red", "地形"
     upright = upright_text.str.contains(NON_UPRIGHT, case=False, regex=True)
     upright |= (df.pitch_max > FLIP_PITCH_DEG) | (df.pitch_min < BACK_ARCH_DEG)

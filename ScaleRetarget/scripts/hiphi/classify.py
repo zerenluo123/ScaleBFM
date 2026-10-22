@@ -52,7 +52,7 @@ def main():
     cols = [
         "motion_id", "rel", "zone", "reason", "frame", "lu", "frame_lu", "actor_id", "mirrored", "is_hoi",
         "object_categories", "text_annotation", "duration_sec", "frame_count", "frame_time", "frames_30", "skeleton", "session",
-        "stands", "ground_shift", "hips_z_min", "hips_z_p50", "hips_z_max", "frac_lift_low", "frac_lift_high",
+        "stands", "ground_shift", "hips_z_min", "hips_z_p50", "hips_z_max", "frac_lift_low", "frac_lift_high", "lift_high_run_s",
         "frac_floor", "pitch_min", "pitch_max", "frac_pitch_back", "frac_pitch_fwd", "base_speed_max",
         "frac_base_fast", "frac_out_ws", "lift_speed_p95", "frac_lift_fast", "hand_z_min", "hand_z_max",
         "base_path_m", "ref_twist_flips", "ref_hand_flips", "ref_pops", "ref_pop_peak", "turned_frames", "error",

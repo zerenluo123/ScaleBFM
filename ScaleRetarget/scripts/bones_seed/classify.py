@@ -46,7 +46,7 @@ def main():
     cols = [
         "filename", "zone", "reason", "frames_120", "frames_30", "seconds", "package", "category",
         "content_short_description", "content_body_position", "content_type_of_movement", "is_mirror",
-        "hips_z_min", "hips_z_p50", "hips_z_max", "frac_lift_low", "frac_lift_high", "frac_floor",
+        "hips_z_min", "hips_z_p50", "hips_z_max", "frac_lift_low", "frac_lift_high", "lift_high_run_s", "frac_floor",
         "pitch_min", "pitch_max", "frac_pitch_back", "frac_pitch_fwd", "base_speed_max", "frac_base_fast", "frac_out_ws",
         "lift_speed_p95", "frac_lift_fast", "hand_z_min", "hand_z_max", "base_path_m", "move_soma_uniform_path",
     ]
