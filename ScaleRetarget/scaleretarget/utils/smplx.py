@@ -1,8 +1,13 @@
+from types import SimpleNamespace
+
 import smplx
 import torch
 
 # AMASS, GRAB and OMOMO store 16 betas; smplx.create builds 10 by default.
 NUM_BETAS = 16
+# smplx poses the whole mesh of every frame it is given (~1 MB per frame); long AMASS clips at 120-250 fps
+# took up to 36 GB in one call.
+CHUNK_FRAMES = 1000
 
 class SmplxModelCache:
 
@@ -24,7 +29,16 @@ class SmplxModelCache:
 
 
 @torch.inference_mode()
-def run_smplx_inference(body_model, **kwargs):
+def run_smplx_inference(body_model, chunk=CHUNK_FRAMES, **kwargs):
+    """global_orient, full_pose and joints of every frame, computed chunk frames at a time."""
+    num_frames = kwargs["global_orient"].shape[0]
     # The model's default expression is a single row, which smplx cannot concatenate with per-frame betas.
-    kwargs.setdefault("expression", torch.zeros(kwargs["global_orient"].shape[0], body_model.num_expression_coeffs))
-    return body_model(**kwargs)
+    kwargs.setdefault("expression", torch.zeros(num_frames, body_model.num_expression_coeffs))
+    parts = []
+    for start in range(0, num_frames, chunk):
+        sub = {k: v[start:start + chunk] if torch.is_tensor(v) and v.shape[0] == num_frames and num_frames > 1 else v
+               for k, v in kwargs.items()}
+        out = body_model(**sub)
+        parts.append((out.global_orient, out.full_pose, out.joints))
+    global_orient, full_pose, joints = (torch.cat(p) for p in zip(*parts))
+    return SimpleNamespace(global_orient=global_orient, full_pose=full_pose, joints=joints)
