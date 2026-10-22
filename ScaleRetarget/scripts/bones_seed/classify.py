@@ -8,7 +8,7 @@ import os
 
 import pandas as pd
 
-from dataset import BONES, BVH_PREFIX, METADATA
+from dataset import BVH_PREFIX, METADATA
 from scaleretarget.pipeline.workspace import assign_zones, write_lists
 
 
@@ -21,7 +21,8 @@ def assign(df):
         terrain_text + " | " + df.content_short_description_2.fillna("") + " | "
         + df.content_name.fillna("").str.replace("_", " ") + " | " + df.filename.str.replace("_", " ")
     )
-    return assign_zones(df, upright_text, terrain_text)
+    # Only the body position tells sitting apart from a description of a seated person or a chair.
+    return assign_zones(df, upright_text, terrain_text, seated_text=df.content_body_position.fillna(""))
 
 
 def main():
@@ -31,11 +32,12 @@ def main():
     args = ap.parse_args()
 
     meta = pd.read_parquet(METADATA)
-    meta["path"] = BONES + "/" + meta.move_soma_uniform_path
     sv = pd.read_parquet(args.survey)
-    df = meta.merge(sv, on="path", how="left")
+    # Matched below the BONES root, so a survey of another machine's copy still applies.
+    sv["move_soma_uniform_path"] = sv.pop("path").str.extract(r"(soma_uniform/.*)$", expand=False)
+    df = meta.merge(sv, on="move_soma_uniform_path", how="left")
     assert df.frames_30.notna().all(), "survey is missing clips"
-    assert (df.error == "").all(), df[df.error != ""].path.head()
+    assert (df.error == "").all(), df[df.error != ""].move_soma_uniform_path.head()
 
     df["zone"], df["reason"] = assign(df)
     df["frames_120"] = df.move_duration_frames

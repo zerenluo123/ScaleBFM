@@ -55,7 +55,8 @@ python scripts/hiphi/survey.py \
 
 - HiPHI 每条只有一个 Frame-LU（如 `Self_motion-crawl`）和一句很长的自然语言描述。描述里很多词是别的意思（“rolling shoulders”、
   “sit down onto the box”），所以地形、非直立只看 Frame-LU；描述只在去掉 rolling / lying / rise up 之后补查非直立的词；跳跃两者都看。
-- 坐地、跪坐、深蹲靠胯部高度判成「贴地」：Hips 低于 0.55 m 的帧超过 1%。HiPHI 一条约 1 分钟，常有做到一半坐到地上一段再站起来的，这样的片段也进红区。
+- 坐地、跪坐、深蹲靠胯部高度判成「贴地」：Hips 只要有一帧低于 0.55 m。HiPHI 一条约 1 分钟，常有做到一半坐到地上一段再站起来的，这样的片段也进红区。
+- 「坐跪」的文字只看 Frame-LU（`Posture-sit`、`Change_posture-sit_down`、`Body_movement-kneel` 等），描述里的 chair、bench 多半是搬的东西。
 - 读不了的片段进红区，原因「骨架不支持」：少数 BVH 是简化骨架，脊柱只有 Spine、Spine1 两节，没有躯干目标跟的 Spine2；3334 条里有 22 条。
 - 参考手臂有任何一帧跳变（第 1 步的两种）的片段进红区，原因「参考数据跳变」：跳变在数据里，转成什么样都跟不了。
 

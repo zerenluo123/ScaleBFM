@@ -26,7 +26,7 @@ AMBIGUOUS = r"\b(?:rolling|lying|ris(?:e|ing) up)\b"
 def assign(df):
     frame_lu = df.frame_lu.str.replace(r"[-_]", " ", regex=True)
     text = df.text_annotation.str.replace(AMBIGUOUS, "", case=False, regex=True)
-    return assign_zones(df, frame_lu + " | " + text, frame_lu, frame_lu + " | " + df.text_annotation)
+    return assign_zones(df, frame_lu + " | " + text, frame_lu, frame_lu + " | " + df.text_annotation, frame_lu)
 
 
 def main():

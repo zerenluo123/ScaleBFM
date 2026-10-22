@@ -1,7 +1,7 @@
 """g1d workspace check of a human motion, per clip, and the red / yellow / green zones built on it.
 
-red     not usable on g1d: non-upright, airborne/terrain, or down near the floor (sitting, kneeling, deep
-        squat) on more than the yellow tolerance of frames
+red     not usable on g1d: non-upright (by text or a torso flipped over), airborne/terrain, down near the
+        floor on any frame, or seated / kneeling / crouched (by text or the hips low most of the clip)
 yellow  usable but partly outside the g1d workspace (lift stroke, lean-back, base speed)
 green   inside the workspace on (almost) every frame
 
@@ -28,7 +28,8 @@ BASE_SPEED = 1.5
 BASE_SPEED_WINDOW = 5  # frames; base speed over ~0.17 s at 30 fps, so mocap jitter does not dominate
 
 NON_UPRIGHT = (
-    r"\b(?:crawl|all fours|hands and knees|lying|plank|handstand|standing on hands|flip|rolling|cartwheel"
+    r"\b(?:crawl|all fours|hands and knees|lying|plank|handstand|standing on hands|flip|back ?flip|rolling"
+    r"|cart ?wheel|handspring"
     r"|somersault|push.?up|swim|prone|superman|flying with wings"
     r"|faint|fall(?:s|ing)? down|falls? (?:to|on|onto) the (?:ground|floor)|rise up|rising up)"
 )
@@ -36,13 +37,15 @@ TERRAIN = r"climb|ladder|stairs|on a box|onto .*box|from (?:a|the) box|obstacle|
 # Jumps stay in when they are kinematically inside the workspace (in-place jumps, dance hops);
 # their vertical speed is handled by the root height filter, not by zoning.
 JUMP = r"jump"
+SEATED = r"\bsit(?:s|ting)?\b|\bseated\b|kneel"
 OUT_WS_FRAC = 0.01
-# Hips below FLOOR_HIPS_Z is over 0.2 m under the lowest lift: the robot cannot follow those frames at all,
-# so they get the same tolerance as frames outside the workspace. A brief floor touch and sitting down do not
-# separate by duration (longest stretches spread evenly over 0.5-10 s in both datasets).
-FLOOR_FRAC = OUT_WS_FRAC
-# A deep squat keeps the Hips above ~0.2 m; lower means sitting or lying on the floor.
-SEATED_HIPS_Z = 0.15
+# Hips below FLOOR_HIPS_Z is over 0.2 m under the lowest lift: the robot cannot follow that frame at all.
+# Sitting on a chair keeps the Hips at 0.55-0.65 m, so a seated clip has its median below SEATED_P50_Z;
+# picking something up from the floor only dips there.
+SEATED_P50_Z = 0.70
+# Deep forward bends stop near 140 deg; flips, cartwheels and handsprings pass through 150-180.
+FLIP_PITCH_DEG = 150.0
+BACK_ARCH_DEG = -45.0
 OUT_WS_REASONS = {
     "frac_lift_low": "升降到底",
     "frac_lift_high": "升降到顶",
@@ -54,7 +57,7 @@ REASON_EN = {
     "非直立": "non-upright", "地形": "terrain", "跳跃（出工作空间）": "jump out of workspace", "贴地": "near floor",
     "升降到底": "lift at bottom", "升降到顶": "lift at top", "后仰超限": "lean-back limit",
     "前俯超限": "lean-forward limit", "底盘超速": "base too fast", "骨架不支持": "unsupported skeleton",
-    "参考数据跳变": "reference pops",
+    "参考数据跳变": "reference pops", "坐跪": "seated / kneeling",
 }
 
 
@@ -117,9 +120,10 @@ def clip_metrics(hips, hips_rot, chest_rot, hands_z, fps, offsets):
     }
 
 
-def assign_zones(df, upright_text, terrain_text, jump_text=None):
+def assign_zones(df, upright_text, terrain_text, jump_text=None, seated_text=None):
     """(zone, reason) per row of clip_metrics columns. upright_text is searched for non-upright motion,
-    terrain_text for terrain, jump_text (default terrain_text) for jumps; later rules override earlier ones."""
+    terrain_text for terrain, jump_text (default terrain_text) for jumps, seated_text (default none) for
+    sitting and kneeling; later rules override earlier ones."""
     jump_text = terrain_text if jump_text is None else jump_text
     zone = pd.Series("green", index=df.index)
     reason = pd.Series("", index=df.index)
@@ -128,13 +132,18 @@ def assign_zones(df, upright_text, terrain_text, jump_text=None):
     zone[out_ws] = "yellow"
     reason[out_ws] = df.loc[out_ws, list(OUT_WS_REASONS)].idxmax(axis=1).map(OUT_WS_REASONS)
 
-    floor = (df.frac_floor > FLOOR_FRAC) | (df.hips_z_min < SEATED_HIPS_Z)
+    seated = df.hips_z_p50 < SEATED_P50_Z
+    if seated_text is not None:
+        seated |= seated_text.str.contains(SEATED, case=False, regex=True)
+    zone[seated], reason[seated] = "red", "坐跪"
+    floor = df.hips_z_min < FLOOR_HIPS_Z
     zone[floor], reason[floor] = "red", "贴地"
     jump = jump_text.str.contains(JUMP, case=False, regex=True) & out_ws
     zone[jump], reason[jump] = "red", "跳跃（出工作空间）"
     terrain = terrain_text.str.contains(TERRAIN, case=False, regex=True)
     zone[terrain], reason[terrain] = "red", "地形"
     upright = upright_text.str.contains(NON_UPRIGHT, case=False, regex=True)
+    upright |= (df.pitch_max > FLIP_PITCH_DEG) | (df.pitch_min < BACK_ARCH_DEG)
     zone[upright], reason[upright] = "red", "非直立"
     return zone, reason
 

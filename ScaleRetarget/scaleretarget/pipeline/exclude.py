@@ -1,6 +1,7 @@
 """Move the clips that the jump audit blames on the data, on our joint limits or on motion too fast for the
 robot into a version's OOD zone.
 
+- converted clips the current zone table puts in red (the version was converted before a stricter rule)
 - an actor whose capture session has twist flips in at least FLIP_SHARE of its scanned clips
   (survey/ref_twist_flips.csv): all of that actor's green and yellow clips of the session
 - clips with a jump segment of an excluded cause (<version>/audit/jump_segments.csv); for causes in the
@@ -34,8 +35,11 @@ def reasons(dataset):
 
 
 def plan(dataset, version_dir, zones):
-    """rel -> reason, flipping actors first."""
-    out = {}
+    """rel -> reason, red clips first, then flipping actors."""
+    red = zones.zone == "red"
+    out = {rel: f"红区：{reason}" for rel, reason in zip(zones.rel[red], zones.reason[red])
+           if os.path.isfile(dataset_pkl(version_dir, rel)) or os.path.isfile(ood_pkl(version_dir, rel))}
+    zones = zones[~red]
     if os.path.isfile(dataset.twist_flips):
         flips = pd.read_csv(dataset.twist_flips).merge(dataset.load_zones()[["rel", "session", "actor"]], on="rel")
         share = flips.groupby(["session", "actor"]).flip_steps.apply(lambda s: (s > 0).mean())
@@ -64,7 +68,6 @@ def main(dataset, argv=None):
     args = ap.parse_args(argv)
     version_dir = dataset.version_dir(args.version)
     zones = dataset.load_zones()
-    zones = zones[zones.zone != "red"]
     zone_of = dict(zip(zones.rel, zones.zone))
 
     todo, done, missing = {}, 0, 0

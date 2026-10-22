@@ -30,7 +30,8 @@ def main():
 
     failed = df.error != ""
     df["zone"], df["reason"] = "red", "骨架不支持"
-    df.loc[~failed, "zone"], df.loc[~failed, "reason"] = assign_zones(df[~failed], df.words[~failed], df.words[~failed])
+    words = df.words[~failed]
+    df.loc[~failed, "zone"], df.loc[~failed, "reason"] = assign_zones(df[~failed], words, words, seated_text=words)
     pops = ~failed & (df.ref_pops > 0)
     df.loc[pops, "zone"], df.loc[pops, "reason"] = "red", "参考数据跳变"
 
