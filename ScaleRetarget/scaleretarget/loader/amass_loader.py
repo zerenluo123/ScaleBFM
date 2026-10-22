@@ -6,7 +6,7 @@ from loguru import logger
 
 from scaleretarget.loader.base_loader import BaseLoader
 from scaleretarget.utils.resampling import resample_smplx_motion
-from scaleretarget.utils.shape_optimizer import optimize_smplx_shape
+from scaleretarget.utils.shape_optimizer import cached_smplx_shape
 from scaleretarget.utils.smplx import SmplxModelCache, run_smplx_inference
 
 class AmassLoader(BaseLoader):
@@ -90,7 +90,7 @@ class AmassLoader(BaseLoader):
         self.use_optimized_shape = self.config.use_optimized_shape
         if self.use_optimized_shape:
             logger.info(f'[Loader] Using optimized shape for retargeting.')
-            self.shape = optimize_smplx_shape(
+            self.shape = cached_smplx_shape(
                 robot_type=self.config.shape_robot.robot_type,
                 robot_xml_path=self.config.shape_robot.robot_xml_path,
                 body_model_path=self.config.body_model_path,

@@ -12,7 +12,8 @@ loader:
     omomo_orig_dir: dataset/omomo_orig
 
     body_model_path: assets/body_models
-    # In multi_process mode each worker runs SMPL-X on its own clips (and fits the shape once).
+    # In multi_process mode each worker runs SMPL-X on its own clips; the first one fits the shape, the others
+    # read it from ~/.cache/scaleretarget (shape_optimizer.cached_smplx_shape).
     load_in_worker: True
     
     exclude_content: []

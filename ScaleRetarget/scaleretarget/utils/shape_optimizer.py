@@ -1,5 +1,9 @@
 import os
 import gc
+import fcntl
+import glob
+import hashlib
+import inspect
 import torch
 import smplx
 import numpy as np
@@ -160,6 +164,37 @@ def optimize_smplx_shape(robot_type,
     gc.collect()
 
     return shape
+
+
+SHAPE_CACHE_DIR = os.environ.get("SCALERETARGET_CACHE", os.path.expanduser("~/.cache/scaleretarget"))
+
+
+def cached_smplx_shape(robot_type, robot_xml_path, body_model_path, optim_joint_matches, optim_iterations):
+    """optimize_smplx_shape, fitted once per input and shared by every worker of a batch run through a file.
+
+    The fit is deterministic (zero start, fixed Adam steps), so the cached shape is the one each worker would
+    fit itself. The key covers everything the fit reads, including its own source, so any change refits."""
+    key = hashlib.sha256()
+    key.update(f"{robot_type}|{optim_iterations}|{NUM_BETAS}".encode())
+    key.update(inspect.getsource(optimize_smplx_shape).encode())
+    for path in (robot_xml_path, optim_joint_matches):
+        key.update(open(path, "rb").read())
+    for path in sorted(glob.glob(os.path.join(body_model_path, "**", "*NEUTRAL*"), recursive=True)):
+        st = os.stat(path)
+        key.update(f"{os.path.realpath(path)}|{st.st_size}|{st.st_mtime_ns}".encode())
+    path = os.path.join(SHAPE_CACHE_DIR, "smplx_shape", f"{robot_type}_{key.hexdigest()[:16]}.pt")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+    with open(path + ".lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if os.path.isfile(path):
+            logger.info(f"[Loader] Optimized smplx shape read from {path}")
+            return torch.load(path)
+        shape = optimize_smplx_shape(robot_type, robot_xml_path, body_model_path, optim_joint_matches, optim_iterations)
+        torch.save(shape, path + ".tmp")
+        os.replace(path + ".tmp", path)
+        logger.info(f"[Loader] Optimized smplx shape saved to {path}")
+        return shape
 
 def optimize_bvh_shape(robot_type,
                        robot_xml_path,
