@@ -14,6 +14,9 @@
   这些只靠胯部高度、俯仰、速度分区。站上高处靠「Hips 连续 1 秒以上高于升降顶端」进地形（CMU 的不平地面、攀爬，KIT/912 等）；
   EKUT 的名字是动作代码，`beam`/`beamn`（架高的平衡木）、`slp`/`slpd`（踏上台子）、`wsu*`/`wsd*`（上下楼梯）按地形算
   （`classify.py` 的 `EKUT_TERRAIN`），它的推、走路几条留着。
+- DFaust 的 `trans` 不在地面上：脚底在 z = 0 下面约 0.61 m（其他子集整条片段的网格最低点都在 ±4 cm 内），不处理会整个子集都判成
+  贴地。`config/loader/amass.yaml` 的 `ground_subsets: [DFaust]` 让 loader 把这些片段抬起来，使片段自己的体型（betas、性别）在
+  整条片段上的网格最低点落在 z = 0；survey 走同一个 loader，扫描、分区、转换都是抬过的。
 
 ## 0. 解压
 
@@ -54,3 +57,8 @@ python scripts/$D/browse.py --build_cache $V
 参考数据跳变 3.36 h、坐跪 2.54 h、地形 1.49 h、非直立 1.07 h、跳跃 0.75 h）。转了 13375 条，没有超限位，参考翻转 0 条，手腕误差
 中位 4.8 cm。OOD 927 条 5.46 h：突跳 683 条 4.63 h（卡在关节限位 258、动作太快 302、转腕上限 67、参考跳变 40、标准 G1 也转不好
 16，集中在 BMLrub 和 DanceDB），转完后加了站上高处的地形规则又移进 244 条 0.83 h。最终 12448 条 38.52 h。
+
+v2（b9f2070）只有 DFaust：加了 `ground_subsets` 后重扫 DFaust 129 条（`survey_raw.parquet` 里只替换这些行）、重新分区（其他子集
+分区不变），绿 91、黄 31、红 7（跳跃）。转了 122 条（`LISTS=[$AMASS_OUT/survey/dfaust_grounded.txt]`，DFaust 的绿、黄片段），16 条突跳（开合跳、甩手）进 OOD，
+保留 106 条约 5 min。最终 AMASS = v1 + v2：分区绿 8058 / 25.70 h，黄 5193 / 17.45 h，红 2676 / 13.69 h；转了 13497 条，
+OOD 943 条 5.47 h，保留 12554 条 38.60 h（绿 25.13 h，黄 13.47 h）。
