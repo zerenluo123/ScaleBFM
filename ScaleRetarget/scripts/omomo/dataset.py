@@ -50,7 +50,7 @@ class Omomo(Dataset):
         df["filename"] = df.rel
         df["group"] = df["actor"] = df["session"] = df.subject
         df["category"] = df.object
-        df["description"] = df.object + " #" + df.take
+        df["description"] = df.object + " #" + df["take"]
         df["seconds"] = df.duration_sec.round(2)
         df["span_expected"] = (df.frame_count - 1) * df.frame_time
         return df
