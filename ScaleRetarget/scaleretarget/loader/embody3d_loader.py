@@ -1,16 +1,14 @@
-import os
+import joblib
 import numpy as np
 import torch
-import joblib
-from natsort import natsorted
 from scipy.spatial.transform import Rotation as R
 from smplx.joint_names import JOINT_NAMES
 from loguru import logger
 
-from scaleretarget.loader.base_loader import BaseLoader, Mode
+from scaleretarget.loader.base_loader import BaseLoader
 from scaleretarget.utils.resampling import resample_smplx_motion
-from scaleretarget.utils.shape_optimizer import optimize_smplx_shape
-from scaleretarget.utils.smplx import SmplxModelCache, run_smplx_inference
+from scaleretarget.utils.shape_optimizer import cached_smplx_shape
+from scaleretarget.utils.smplx import SmplxModelCache, lowest_vertex_z, run_smplx_inference
 
 class Embody3dLoader(BaseLoader):
 
@@ -19,37 +17,6 @@ class Embody3dLoader(BaseLoader):
         self.body_models = SmplxModelCache(self.config.body_model_path)
         self._optimize_shape()
 
-    def load(self, data_path):
-        self.data_path = data_path
-
-        if os.path.isdir(self.data_path):
-            self.mode = Mode.dir
-
-            self.data_list = []
-            for dir_path, _, filenames in os.walk(self.data_path):
-                for filename in natsorted(filenames):
-                    if filename.endswith((".pkl")):
-                        self.data_list.append(os.path.join(dir_path, filename))
-            
-            if self.config.exclude_content:
-                logger.info(f"[Loader] Removing motions with keywords: {self.config.exclude_content}")
-                self.data_list = [
-                    path for path in self.data_list
-                    if not any(content in path for content in self.config.exclude_content)
-                ]
-
-            self.data_num = len(self.data_list)
-        elif os.path.isfile(self.data_path):
-            suffix = os.path.splitext(self.data_path)[-1]
-            assert suffix == self.format, f"You are using the data loader for {self.format} format but the data you give is {suffix} format!"
-            self.mode = Mode.file
-            self.data_list = [self.data_path]
-            self.data_num = 1
-        else:
-            raise Exception(f"Check your data path: {self.data_path}")
-        
-        logger.info(f"[Loader] Total number of motions: {self.data_num}")
-
     def _load_sample(self, sample_path):
         smplx_data = joblib.load(sample_path)
         num_frames = smplx_data['pose_body'].shape[0]
@@ -57,6 +24,11 @@ class Embody3dLoader(BaseLoader):
         rot_offset = R.from_quat([0.5,0.5,0.5,0.5], scalar_first=True)
         smplx_data['root_orient'] = (rot_offset * R.from_rotvec(smplx_data['root_orient'])).as_rotvec()
         smplx_data['trans'] = rot_offset.apply(smplx_data['trans'])
+        trans = torch.tensor(smplx_data["trans"]).float()
+        ground_shift = 0.0
+        if self.config.get("ground", False):
+            ground_shift = -self._lowest_vertex_z(smplx_data, trans)
+            trans[:, 2] += ground_shift
 
         if self.use_optimized_shape:
             betas = self.shape
@@ -69,7 +41,7 @@ class Embody3dLoader(BaseLoader):
             betas=betas, # (16,)
             global_orient=torch.tensor(smplx_data["root_orient"]).float(), # (N, 3)
             body_pose=torch.tensor(smplx_data["pose_body"]).float(), # (N, 63)
-            transl=torch.tensor(smplx_data["trans"]).float(), # (N, 3)
+            transl=trans, # (N, 3)
             left_hand_pose=torch.zeros(num_frames, 45).float(),
             right_hand_pose=torch.zeros(num_frames, 45).float(), # FIXME: use real hand pose when dex hands are available
             jaw_pose=torch.zeros(num_frames, 3).float(),
@@ -120,17 +92,41 @@ class Embody3dLoader(BaseLoader):
             "fps": aligned_fps,
             "disable_scale_table": self.use_optimized_shape,
             "actual_human_height": human_height,
+            "ground_shift": ground_shift,
         }
 
         return frames, extras
+
+    def _lowest_vertex_z(self, smplx_data, trans):
+        """Lowest point of the clip's own body (its neutral betas, all of them) over the tracked frames of the
+        clip; the untracked ones (smplx_data['tracked'] False) hold no real pose."""
+        betas = np.asarray(smplx_data["betas"]).reshape(1, -1)
+        if not hasattr(self, "ground_models"):
+            self.ground_models = SmplxModelCache(self.config.body_model_path, num_betas=betas.shape[1])
+        tracked = np.asarray(smplx_data.get("tracked", np.ones(len(trans), bool)), bool)
+        if not tracked.any():
+            tracked[:] = True
+        num_frames = int(tracked.sum())
+        return lowest_vertex_z(
+            self.ground_models.get('neutral'),
+            betas=torch.tensor(betas).float(),
+            global_orient=torch.tensor(smplx_data["root_orient"][tracked]).float(),
+            body_pose=torch.tensor(smplx_data["pose_body"][tracked]).float(),
+            transl=trans[torch.from_numpy(tracked)],
+            left_hand_pose=torch.zeros(num_frames, 45).float(),
+            right_hand_pose=torch.zeros(num_frames, 45).float(),
+            jaw_pose=torch.zeros(num_frames, 3).float(),
+            leye_pose=torch.zeros(num_frames, 3).float(),
+            reye_pose=torch.zeros(num_frames, 3).float(),
+        )
     
     def _optimize_shape(self):
         self.use_optimized_shape = self.config.use_optimized_shape
         if self.use_optimized_shape:
             logger.info(f'[Loader] Using optimized shape for retargeting.')
-            self.shape = optimize_smplx_shape(
-                robot_type=self.config.robot.robot_type,
-                robot_xml_path=self.config.robot.robot_xml_path,
+            self.shape = cached_smplx_shape(
+                robot_type=self.config.shape_robot.robot_type,
+                robot_xml_path=self.config.shape_robot.robot_xml_path,
                 body_model_path=self.config.body_model_path,
                 optim_joint_matches=self.config.optim_joint_matches,
                 optim_iterations=self.config.optim_iterations,

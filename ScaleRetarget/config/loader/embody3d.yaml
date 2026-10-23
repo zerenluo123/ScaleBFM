@@ -11,9 +11,19 @@ loader:
     data_format: .pkl
 
     body_model_path: assets/body_models
+    # In multi_process mode each worker runs SMPL-X on its own clips; the first one fits the shape, the others
+    # read it from ~/.cache/scaleretarget (shape_optimizer.cached_smplx_shape).
+    load_in_worker: True
     
     exclude_content: []
 
+    # Embody3D's transl does not put the body on the floor: after the Y-up to Z-up turn the lowest point of
+    # the body sits 0.2-0.4 m above z = 0, by a different amount for each person. Each clip is lifted or
+    # lowered so the lowest point of its own body over its tracked frames is at z = 0.
+    ground: True
+
     use_optimized_shape: True # When using optimized shape, the scale table would be disabled
     optim_iterations: 6000
-    optim_joint_matches: config/correspondence/optim_shape/${loader.config.loader_type}_to_${robot.robot_type}.yaml
+    # The robot the shape is fitted to; unitree_g1d.yaml points at the G1.
+    shape_robot: ${oc.select:robot.smplx_shape_robot,${robot}}
+    optim_joint_matches: config/correspondence/optim_shape/${loader.config.loader_type}_to_${loader.config.shape_robot.robot_type}.yaml

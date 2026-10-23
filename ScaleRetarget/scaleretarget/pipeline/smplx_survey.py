@@ -1,4 +1,4 @@
-"""Per-clip kinematic survey of an SMPL-X dataset (GRAB, OMOMO, AMASS) against the g1d workspace.
+"""Per-clip kinematic survey of an SMPL-X dataset (GRAB, OMOMO, AMASS, Embody3D) against the g1d workspace.
 
 Loads each clip with the dataset's loader at 30 fps, as the batch run does (body shape fitted to the G1,
 pelvis at the clip's own height), and writes one row of workspace metrics (workspace.py) per clip, plus
@@ -6,7 +6,7 @@ the frame count and time at the capture rate, the clip's body (gender, betas[0];
 and the steps where the reference arm pops (ref_pops.py; the clip is reloaded at its capture rate only
 when an arm flips). Zones are assigned afterwards (the dataset's classify.py).
 
-The bones come from the dataset's g1d correspondence table; the three datasets share the original G1 one.
+The bones come from the dataset's g1d correspondence table; the four datasets share the original G1 one.
 """
 
 import os
@@ -21,7 +21,7 @@ from scipy.spatial.transform import Rotation as R
 
 from scaleretarget.pipeline.dataset import ROOT
 from scaleretarget.pipeline.ref_pops import frame_rotations, reference_pops, table_arm_bones
-from scaleretarget.pipeline.workspace import clip_metrics, rotation_offsets
+from scaleretarget.pipeline.workspace import clip_metrics, longest_run, rotation_offsets
 
 FPS = 30
 HANDS = ("left_wrist", "right_wrist")
@@ -29,11 +29,16 @@ _ctx = {}
 
 
 def read_header(path):
-    """Frame count and time at the capture rate, and the clip's gender and betas[0]."""
+    """Frame count and time at the capture rate, the clip's gender and betas[0], and, where the data marks
+    its frames as tracked or not (Embody3D), the share of untracked frames and their longest run."""
     data = joblib.load(path) if path.endswith(".pkl") else np.load(path, allow_pickle=True)
     rate = float(np.asarray(data["mocap_frame_rate"]).item())
-    return {"frame_count": int(len(data["pose_body"])), "frame_time": 1.0 / rate,
-            "gender": str(np.asarray(data["gender"]).item()), "beta0": float(np.asarray(data["betas"]).reshape(-1)[0])}
+    header = {"frame_count": int(len(data["pose_body"])), "frame_time": 1.0 / rate,
+              "gender": str(np.asarray(data["gender"]).item()), "beta0": float(np.asarray(data["betas"]).reshape(-1)[0])}
+    if "tracked" in data:
+        lost = ~np.asarray(data["tracked"], bool)
+        header |= {"frac_untracked": float(lost.mean()), "untracked_run_s": longest_run(lost) / rate}
+    return header
 
 
 def _init(dataset):

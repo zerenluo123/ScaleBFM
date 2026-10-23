@@ -11,8 +11,9 @@ CHUNK_FRAMES = 1000
 
 class SmplxModelCache:
 
-    def __init__(self, body_model_path):
+    def __init__(self, body_model_path, num_betas=NUM_BETAS):
         self.body_model_path = body_model_path
+        self.num_betas = num_betas
         self._models = {}
 
     def get(self, gender):
@@ -23,7 +24,7 @@ class SmplxModelCache:
                 "smplx",
                 gender=gender,
                 use_pca=False,
-                num_betas=NUM_BETAS,
+                num_betas=self.num_betas,
             )
         return self._models[gender]
 

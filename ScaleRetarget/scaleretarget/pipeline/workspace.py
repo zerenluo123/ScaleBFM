@@ -60,7 +60,7 @@ REASON_EN = {
     "非直立": "non-upright", "地形": "terrain", "跳跃（出工作空间）": "jump out of workspace", "贴地": "near floor",
     "升降到底": "lift at bottom", "升降到顶": "lift at top", "后仰超限": "lean-back limit",
     "前俯超限": "lean-forward limit", "底盘超速": "base too fast", "骨架不支持": "unsupported skeleton",
-    "参考数据跳变": "reference pops", "坐跪": "seated / kneeling",
+    "参考数据跳变": "reference pops", "坐跪": "seated / kneeling", "参考数据缺帧": "untracked frames",
 }
 
 
