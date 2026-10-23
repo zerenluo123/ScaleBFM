@@ -41,7 +41,7 @@ python scripts/amass/classify.py --survey $AMASS_OUT/survey/survey_raw.parquet -
 VERSION=v1 NOTE="first run" NUM_WORKERS=64 scripts/amass/retarget.sh    # 在 tmux 里跑
 D=amass OUT=$AMASS_OUT V=v1
 python scripts/$D/audit.py --run_dir $OUT/$V --out_dir $OUT/$V/audit --workers 64
-python scripts/$D/jump_audit.py flips --workers 64
+python scripts/$D/jump_audit.py flips --workers 64           # 只看参考数据；loader 没改过（只是重转）可以跳过
 python scripts/$D/jump_audit.py segments --version $V --workers 64
 python scripts/$D/exclude_ood.py --version $V               # 只打印名单
 python scripts/$D/exclude_ood.py --version $V --apply
@@ -58,7 +58,8 @@ python scripts/$D/browse.py --build_cache $V
 中位 4.8 cm。OOD 927 条 5.46 h：突跳 683 条 4.63 h（卡在关节限位 258、动作太快 302、转腕上限 67、参考跳变 40、标准 G1 也转不好
 16，集中在 BMLrub 和 DanceDB），转完后加了站上高处的地形规则又移进 244 条 0.83 h。最终 12448 条 38.52 h。
 
-v2（b9f2070）只有 DFaust：加了 `ground_subsets` 后重扫 DFaust 129 条（`survey_raw.parquet` 里只替换这些行）、重新分区（其他子集
-分区不变），绿 91、黄 31、红 7（跳跃）。转了 122 条（`LISTS=[$AMASS_OUT/survey/dfaust_grounded.txt]`，DFaust 的绿、黄片段），16 条突跳（开合跳、甩手）进 OOD，
-保留 106 条约 5 min。最终 AMASS = v1 + v2：分区绿 8058 / 25.70 h，黄 5193 / 17.45 h，红 2676 / 13.69 h；转了 13497 条，
-OOD 943 条 5.47 h，保留 12554 条 38.60 h（绿 25.13 h，黄 13.47 h）。
+v2（b9f2070）是最终版本，v1 作废。加了 `ground_subsets` 后重扫 DFaust 129 条（`survey_raw.parquet` 里只替换这些行；其他子集
+loader 输出不变，不用重扫）、全表重新分区：绿 8058 / 25.70 h，黄 5193 / 17.45 h，红 2676 / 13.69 h（DFaust 绿 91、黄 31、红 7）。
+按绿、黄名单全量转了 13251 条，和 v1 比少了 246 条站上高处（现在是红区地形），多了 122 条 DFaust，共有的 13129 条转换结果逐位
+相同。检查：手腕误差中位 4.7 cm，没有超限位；参考翻转沿用 v1 时的 `ref_twist_flips.csv`（0 条）。突跳 697 条 4.63 h 进 OOD
+（卡在关节限位 260、动作太快 306、转腕上限 70、参考跳变 45、标准 G1 也转不好 16）。最终 12554 条 38.60 h（绿 25.13 h，黄 13.47 h）。
