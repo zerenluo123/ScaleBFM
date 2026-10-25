@@ -145,3 +145,28 @@ BONES_SEED=$R/bones-seed BONES_SEED_OUT=$R/bone-seed_retarget python scripts/bon
 ```
 
 tmux、转完后的检查和剔除、本机挂载的复制即用命令见 `scripts/hiphi/SOP.md` 第 7 节「常用命令」。
+
+## 8. 抬高版（v2）：救回贴地、坐跪
+
+做法和规则同 `scripts/embody3d/SOP.md` 第 7 节：转换时把胯部最低抬到 0.801 m（升降到底），贴地、坐跪的片段除了趴躺伏地都保留，
+所有保留片段按抬高后的动作分区，长时间后仰、侧倾进红区。全程胯部不低于 0.801 m 的片段从 v1 硬链接，只转其余的。
+
+```bash
+python scripts/bones_seed/survey.py --torso --out $BONES_SEED_OUT/survey/torso_raw.parquet --workers 64      # 约 2 min
+python scripts/bones_seed/classify.py --survey $BONES_SEED_OUT/survey/survey_raw.parquet --out_dir $BONES_SEED_OUT/survey \
+    --torso $BONES_SEED_OUT/survey/torso_raw.parquet
+python scripts/bones_seed/link_unraised.py --src v1 --dst v2 [--apply]
+VERSION=v2 NOTE="raised: hips kept at or above the lowest lift" NUM_WORKERS=64 scripts/bones_seed/retarget.sh \
+    ++robot.root_height_filter.min_height=0.801
+```
+
+v1 用的分区备份为 `survey/*_v1.*`。
+
+| | 绿区 | 黄区 | 红区 |
+|---|---|---|---|
+| v1 分区 | 67658 条 / 141.8 h | 44842 条 / 94.4 h | 29720 条 / 52.2 h |
+| v2 分区 | 76490 条 / 160.2 h | 44140 条 / 93.9 h | 21590 条 / 34.1 h |
+
+贴地、坐跪 11206 条 / 23.7 h 里抬高救回 8588 条 / 19.3 h，趴躺伏地留红区 2379 条 / 3.6 h（多是 locomotion 里的爬、躺）；
+v1 黄绿区改进红区 458 条 / 1.3 h（侧倾过大 318、后仰过大 140）。v2 从 v1 链接 105847 条 / 221.5 h（105 条在 OOD；94 条从 v1 的
+OOD 回到 bvh/），转 14783 条 / 32.6 h。

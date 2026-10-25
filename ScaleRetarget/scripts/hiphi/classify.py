@@ -9,7 +9,11 @@ no Spine2 for the torso target) are red with the reason 骨架不支持. Clips w
 step (a twist flip or a hand flip faster than a human arm turns, see survey.py) are red with the reason
 参考数据跳变: the pop is in the data, so no retarget can follow it.
 
-    python scripts/hiphi/classify.py --survey survey_raw.parquet --out_dir DIR
+With --torso (survey.py --torso) the zones are for a retarget that raises the body to the lowest lift
+(robot.root_height_filter.min_height, workspace.assign_raised_zones): near-floor and seated clips that do
+not lie on the floor are kept, and clips holding a lean g1d cannot follow go red.
+
+    python scripts/hiphi/classify.py --survey survey_raw.parquet --out_dir DIR [--torso torso_raw.parquet]
 """
 
 import argparse
@@ -18,7 +22,7 @@ import os
 import pandas as pd
 
 from dataset import MIRROR, read_metadata
-from scaleretarget.pipeline.workspace import assign_zones, write_lists
+from scaleretarget.pipeline.workspace import assign_raised_zones, assign_zones, write_lists
 
 AMBIGUOUS = r"\b(?:rolling|lying|ris(?:e|ing) up)\b"
 
@@ -33,6 +37,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--survey", required=True)
     ap.add_argument("--out_dir", required=True)
+    ap.add_argument("--torso", default=None, help="survey.py --torso output: zone for the raised retarget")
     args = ap.parse_args()
 
     meta = read_metadata()
@@ -45,6 +50,14 @@ def main():
     df.loc[~failed, "zone"], df.loc[~failed, "reason"] = assign(df[~failed])
     pops = ~failed & (df.ref_pops > 0)
     df.loc[pops, "zone"], df.loc[pops, "reason"] = "red", "参考数据跳变"
+    torso_cols = []
+    if args.torso:
+        torso = pd.read_parquet(args.torso).rename(columns={"path": "package_bvh"})
+        torso = torso[torso.error == ""].drop(columns="error")
+        torso_cols = [c for c in torso.columns if c != "package_bvh"]
+        df = df.merge(torso, on="package_bvh", how="left")
+        df["zone"], df["reason"], df["raised"] = assign_raised_zones(df)
+        torso_cols = ["raised", *torso_cols]
     # A mirrored clip has its original's skeleton (offsets mirrored); both count as one capture session.
     original = df.motion_id.str.removesuffix(MIRROR)
     df["session"] = df.actor_id + "/" + original.map(dict(zip(df.motion_id, df.skeleton))).fillna(df.skeleton)
@@ -55,7 +68,7 @@ def main():
         "stands", "ground_shift", "hips_z_min", "hips_z_p50", "hips_z_max", "frac_lift_low", "frac_lift_high", "lift_high_run_s",
         "frac_floor", "pitch_min", "pitch_max", "frac_pitch_back", "frac_pitch_fwd", "base_speed_max",
         "frac_base_fast", "frac_out_ws", "lift_speed_p95", "frac_lift_fast", "hand_z_min", "hand_z_max",
-        "base_path_m", "ref_twist_flips", "ref_hand_flips", "ref_pops", "ref_pop_peak", "turned_frames", "error",
+        "base_path_m", "ref_twist_flips", "ref_hand_flips", "ref_pops", "ref_pop_peak", "turned_frames", *torso_cols, "error",
     ]
     os.makedirs(args.out_dir, exist_ok=True)
     out = df[cols].sort_values(["zone", "reason", "frame_lu", "motion_id"])

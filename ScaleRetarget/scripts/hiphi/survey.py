@@ -8,7 +8,11 @@ pops. Zones are assigned afterwards from these metrics (classify.py).
 
 Pops are checked at the capture's own rate, 90 fps (scaleretarget/pipeline/ref_pops.py).
 
+With --torso it writes workspace.torso_metrics instead, for the zones of a retarget that raises the body
+to the lowest lift (classify.py --torso).
+
     python scripts/hiphi/survey.py --out survey_raw.parquet [--limit N] [--workers 20]
+    python scripts/hiphi/survey.py --torso --out torso_raw.parquet [--workers 64]
 """
 
 import argparse
@@ -24,7 +28,7 @@ from scipy.spatial.transform import Rotation as R
 
 from dataset import CORRESPONDENCE, ROOT, read_metadata
 from scaleretarget.pipeline.ref_pops import bvh_rotations, reference_pops, table_arm_bones
-from scaleretarget.pipeline.workspace import clip_metrics, rotation_offsets
+from scaleretarget.pipeline.workspace import clip_metrics, rotation_offsets, torso_metrics
 
 FPS = 30
 OFFSETS = rotation_offsets(CORRESPONDENCE)
@@ -61,15 +65,31 @@ def _loader():
     return _ctx["loader"]
 
 
+def load_clip(path):
+    """Loader frames and extras of a clip, and the inputs of clip_metrics / torso_metrics."""
+    frames, extras = _loader()._load_sample(path)
+    pos = lambda b: np.array([f[b][0] for f in frames])
+    rot = lambda b: R.from_quat(np.array([f[b][1] for f in frames]), scalar_first=True)
+    hands_z = np.stack([pos(h)[:, 2] for h in HANDS], 1)
+    return frames, extras, (pos(HIPS), rot(HIPS), rot(CHEST), hands_z, extras["fps"], OFFSETS)
+
+
+def torso_clip(path):
+    row = {"path": path}
+    try:
+        row |= torso_metrics(*load_clip(path)[2])
+        row["error"] = ""
+    except Exception as e:  # noqa: BLE001
+        row["error"] = repr(e)
+    return row
+
+
 def survey_clip(path):
     row = {"path": path}
     try:
         row["skeleton"], row["frame_time"] = read_header(path)
-        frames, extras = _loader()._load_sample(path)
-        pos = lambda b: np.array([f[b][0] for f in frames])
-        rot = lambda b: R.from_quat(np.array([f[b][1] for f in frames]), scalar_first=True)
-        hands_z = np.stack([pos(h)[:, 2] for h in HANDS], 1)
-        row |= clip_metrics(pos(HIPS), rot(HIPS), rot(CHEST), hands_z, extras["fps"], OFFSETS)
+        frames, extras, inputs = load_clip(path)
+        row |= clip_metrics(*inputs)
         row |= reference_pops(lambda: bvh_rotations(path), frames, extras["fps"], row["frame_time"], ARM_BONES)
         row |= {
             "turned_frames": ",".join(f"{b}:{k}" for b, k in extras["turned_frames"].items()),
@@ -86,8 +106,10 @@ def main():
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--workers", type=int, default=os.cpu_count())
     ap.add_argument("--paths", nargs="*", default=None)
+    ap.add_argument("--torso", action="store_true", help="torso metrics for the raised zones (classify.py --torso)")
     args = ap.parse_args()
     os.chdir(ROOT)
+    clip = torso_clip if args.torso else survey_clip
 
     if args.paths:
         paths = args.paths
@@ -100,7 +122,7 @@ def main():
     t0 = time.time()
     rows = []
     with Pool(args.workers) as pool:
-        for i, row in enumerate(pool.imap_unordered(survey_clip, paths, chunksize=2), 1):
+        for i, row in enumerate(pool.imap_unordered(clip, paths, chunksize=2), 1):
             rows.append(row)
             if i % 500 == 0 or i == len(paths):
                 el = time.time() - t0

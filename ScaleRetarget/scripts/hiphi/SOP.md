@@ -272,3 +272,28 @@ python scripts/hiphi/calibrate_offsets.py
 - torso_link 位置偏移：让胸口目标相对两肩目标的位置和 SOMA 一样（随机动作的中位数，在胸口目标坐标系里量）。
 - 选 Spine2 而不是 Spine4 的原因：Spine4 挂着两肩，抬手、耸肩时会跟着转，胸口目标约 1/5 的帧后仰超过 G1-D 腰的极限；
   Spine2 在前后弯、侧弯、扭腰时跟躯干的关系和 SOMA Chest 最接近。
+
+## 9. 抬高版（v3）：救回贴地、坐跪
+
+做法和规则同 `scripts/embody3d/SOP.md` 第 7 节：转换时把胯部最低抬到 0.801 m（升降到底），贴地、坐跪的片段除了趴躺伏地都保留，
+所有保留片段按抬高后的动作分区，长时间后仰、侧倾进红区。全程胯部不低于 0.801 m 的片段从 v2 硬链接，只转其余的。
+
+```bash
+python scripts/hiphi/survey.py --torso --out $HIPHI_OUT/survey/torso_raw.parquet --workers 64      # 约 21 min
+python scripts/hiphi/classify.py --survey $HIPHI_OUT/survey/survey_raw.parquet --out_dir $HIPHI_OUT/survey \
+    --torso $HIPHI_OUT/survey/torso_raw.parquet
+python scripts/hiphi/link_unraised.py --src v2 --dst v3 [--apply]
+VERSION=v3 NOTE="raised: hips kept at or above the lowest lift" NUM_WORKERS=64 scripts/hiphi/retarget.sh \
+    ++robot.root_height_filter.min_height=0.801
+```
+
+v2 用的分区备份为 `survey/*_v2.*`。
+
+| | 绿区 | 黄区 | 红区 |
+|---|---|---|---|
+| v2 分区 | 21521 条 / 373.2 h | 8694 条 / 152.8 h | 5037 条 / 91.5 h |
+| v3 分区 | 23889 条 / 414.5 h | 9486 条 / 167.4 h | 1877 条 / 35.6 h |
+
+贴地、坐跪 4035 条 / 71.5 h 里抬高救回 3186 条 / 56.4 h，趴躺伏地留红区 787 条 / 14.1 h；v2 黄绿区改进红区 26 条 / 0.5 h
+（侧倾过大 20、后仰过大 6）。v3 从 v2 链接 29170 条 / 507.1 h（27 条在 OOD；18 条文字说坐、跪但胯部不低的从 v2 的 OOD 回到 bvh/），
+转 4205 条 / 74.7 h。

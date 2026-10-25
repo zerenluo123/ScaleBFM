@@ -4,7 +4,11 @@ Parses only the joints needed (hips, spine chain, arms), downsamples to 30 fps, 
 of metrics (scaleretarget/pipeline/workspace.py) per clip. Zones are assigned afterwards from these
 metrics, so thresholds can be changed without re-reading the 277 GB of BVH text.
 
+With --torso it writes workspace.torso_metrics instead, for the zones of a retarget that raises the body
+to the lowest lift (classify.py --torso).
+
     python scripts/bones_seed/survey.py --out /path/to/survey.parquet [--limit N] [--workers 20]
+    python scripts/bones_seed/survey.py --torso --out /path/to/torso_raw.parquet [--workers 64]
 """
 
 import argparse
@@ -17,7 +21,7 @@ import pandas as pd
 from scipy.spatial.transform import Rotation as R
 
 from dataset import BONES, CORRESPONDENCE, METADATA
-from scaleretarget.pipeline.workspace import clip_metrics, rotation_offsets
+from scaleretarget.pipeline.workspace import clip_metrics, rotation_offsets, torso_metrics
 
 SRC_FPS = 120
 STRIDE = 4  # 120 fps -> 30 fps, same rate the retarget runs at
@@ -107,13 +111,17 @@ def load_joints(path):
     return pos, rot
 
 
-def survey_clip(path):
+def survey_clip(path, metrics=clip_metrics):
     try:
         P, rot = load_joints(path)
     except Exception as e:  # noqa: BLE001 - one bad file should not kill a 142k-file sweep
         return {"path": path, "error": repr(e)}
     hands_z = np.stack([P["LeftHand"][:, 2], P["RightHand"][:, 2]], 1)
-    return {"path": path, **clip_metrics(P["Hips"], rot["Hips"], rot["Chest"], hands_z, FPS, OFFSETS), "error": ""}
+    return {"path": path, **metrics(P["Hips"], rot["Hips"], rot["Chest"], hands_z, FPS, OFFSETS), "error": ""}
+
+
+def torso_clip(path):
+    return survey_clip(path, torso_metrics)
 
 
 def main():
@@ -122,7 +130,9 @@ def main():
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--workers", type=int, default=os.cpu_count())
     ap.add_argument("--paths", nargs="*", default=None)
+    ap.add_argument("--torso", action="store_true", help="torso metrics for the raised zones (classify.py --torso)")
     args = ap.parse_args()
+    clip = torso_clip if args.torso else survey_clip
 
     meta = pd.read_parquet(METADATA)
     if args.paths:
@@ -135,7 +145,7 @@ def main():
     t0 = time.time()
     rows = []
     with Pool(args.workers) as pool:
-        for i, row in enumerate(pool.imap_unordered(survey_clip, paths, chunksize=8), 1):
+        for i, row in enumerate(pool.imap_unordered(clip, paths, chunksize=8), 1):
             rows.append(row)
             if i % 2000 == 0 or i == len(paths):
                 el = time.time() - t0
