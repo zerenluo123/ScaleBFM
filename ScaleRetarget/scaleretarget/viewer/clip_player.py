@@ -21,6 +21,7 @@ its own arm-joint jumps (> 20 rad/s after frame 5), e.g. to compare an IK change
 """
 
 import argparse
+import json
 import os
 import shutil
 import sys
@@ -45,7 +46,13 @@ MAX_SPIKES_SHOWN = 6
 
 def load_config(robot, loader, overrides=(), snapshot=None):
     """Compose the retarget config; with snapshot (a version folder), the config files it saved replace
-    the current ones, so the targets match what that version was run with."""
+    the current ones and the robot overrides of its run.json are applied, so the targets match what that
+    version was run with."""
+    if snapshot is not None:
+        run_json = os.path.join(snapshot, "run.json")
+        saved_overrides = json.load(open(run_json)).get("overrides", []) if os.path.isfile(run_json) else []
+        robot_overrides = [o for o in saved_overrides if o.lstrip("+").startswith("robot.")]
+        overrides = list(dict.fromkeys([*robot_overrides, *overrides]))
     with tempfile.TemporaryDirectory() as tmp:
         config_dir = os.path.abspath(CONFIG_DIR)
         saved = snapshot is not None and os.path.isdir(os.path.join(snapshot, "config"))
