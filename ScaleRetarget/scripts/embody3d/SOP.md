@@ -50,6 +50,44 @@ python scripts/$D/exclude_ood.py --version $V --apply
 python scripts/$D/browse.py --build_cache $V
 ```
 
+## 7. 抬高版（v2）：救回贴地、坐跪
+
+v1 的「贴地」（任一帧胯部低于 0.55 m）、「坐跪」（胯部中位低于 0.70 m 或文字说坐、跪）整条进红区，一共 4221 条 / 100.3 h，
+里面很多是跪着、坐着、坐在地上，上半身在做事。g1d 没有腿，升降到底时胯部停在 0.801 m（`workspace.LIFT_BASE`），人再往下，
+手的目标也跟着往下，上半身就被拉变形。v2 在 retarget 时打开 `++robot.root_height_filter.min_height=0.801`：胯部低于 0.801 m
+的帧，整个人往上平移到胯部 0.801 m 再平滑（`root_height_filter.py`），上半身相对胯部的姿态不变，等于把腿切掉。不开时和原来逐字节
+一样；IK 没改。代价是跪、坐时手碰地面、桌面的接触关系没了（手跟着抬高 0.2–0.6 m）。
+
+分区规则（`workspace.assign_raised_zones`，`classify.py --torso`），按整条定，不切段：
+
+- 贴地、坐跪的片段抬高后保留，按抬高后的动作重新分黄绿区（绿区原因写「抬高救回」）；但只要有一帧胯部低于 0.35 m、上身前倾或后倒
+  超过 45° 就留红区「趴躺伏地」。上身偏离直立 60° 以上的帧，胯部高度在 0.10–0.35 m（躺在地上）和 0.35–0.70 m（跪着往前趴）
+  两堆，中间几乎没有，0.35 m 取的是这个空档。
+- 所有保留的片段（原黄绿区也一样）都按抬高后的动作分区，并且：后仰超过 −19°（v1 黄绿区最差的 5%）连续超过 2 s，进红区
+  「后仰过大」（例：坐在椅子上往后靠着讲课）；上身侧倾（偏离前后竖直面，g1d 没有这个关节）超过 25° 连续超过 2 s，进红区「侧倾过大」。
+  阈值是对着面板里看过的 10 条定的：侧倾 20° 会误判两条好数据。
+
+```bash
+python scripts/embody3d/torso_survey.py --out $EMBODY3D_OUT/survey/torso_raw.parquet --workers 64      # 约 90 min
+python scripts/embody3d/classify.py --survey $EMBODY3D_OUT/survey/survey_raw.parquet --out_dir $EMBODY3D_OUT/survey \
+    --torso $EMBODY3D_OUT/survey/torso_raw.parquet
+python scripts/embody3d/link_unraised.py --src v1 --dst v2            # 只打印
+python scripts/embody3d/link_unraised.py --src v1 --dst v2 --apply
+VERSION=v2 NOTE="raised: hips kept at or above the lowest lift" NUM_WORKERS=64 scripts/embody3d/retarget.sh \
+    ++robot.root_height_filter.min_height=0.801
+```
+
+然后对 v2 照第 3–6 步检查、剔除 OOD。`link_unraised.py`：保留的片段里全程胯部不低于 0.801 m 的，抬高不起作用，结果和 v1
+一样，直接从 v1 硬链接 pkl（v1 的 OOD 链接进 v2 的 OOD，原因一起带过来），v2 只转其余的；v1 不动。
+
+| | 绿区 | 黄区 | 红区 |
+|---|---|---|---|
+| v1 分区 | 4022 条 / 39.1 h | 17069 条 / 333.8 h | 5676 条 / 128.0 h |
+| v2 分区 | 5520 条 / 59.3 h（其中抬高救回 1220 条 / 17.9 h） | 18058 条 / 357.5 h | 3189 条 / 84.1 h |
+
+v2 的红区：后仰过大 799 条 / 29.1 h，趴躺伏地 604 / 12.7，侧倾过大 331 / 14.5，其余原因同 v1。v1 黄绿区里因后仰、侧倾改进红区
+的 351 条 / 15.9 h。v2 从 v1 链接 18621 条 / 309.3 h（945 条在 OOD），转 4957 条 / 107.6 h。
+
 `jump_audit.py flips` 按子集筛用 `--subsets locomotion charades`。服务器上检查步骤用 `--workers 8`（见 `scripts/amass/SOP.md`）。
 
 本机用 7 个子集各一段采集的 13 条试过（`convert` → `survey` → `classify` → 转 3 条 → 检查）：手腕误差中位 2–5 cm，骨盆 < 1 cm；

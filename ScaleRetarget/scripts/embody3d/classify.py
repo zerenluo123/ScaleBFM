@@ -7,7 +7,11 @@ the lift top). Clips whose reference arm pops on any step are red with the reaso
 HiPHI), and so are clips with any frame the capture marks as untracked (参考数据缺帧): its pose is not
 the person's.
 
-    python scripts/embody3d/classify.py --survey survey_raw.parquet --out_dir DIR
+With --torso (torso_survey.py) the zones are for a retarget that raises the body to the lowest lift
+(robot.root_height_filter.min_height, workspace.assign_raised_zones): near-floor and seated clips that do
+not lie on the floor are kept, and clips holding a lean g1d cannot follow go red.
+
+    python scripts/embody3d/classify.py --survey survey_raw.parquet --out_dir DIR [--torso torso_raw.parquet]
 """
 
 import argparse
@@ -16,13 +20,14 @@ import os
 import pandas as pd
 
 from dataset import clip_names
-from scaleretarget.pipeline.workspace import assign_zones, write_lists
+from scaleretarget.pipeline.workspace import assign_raised_zones, assign_zones, write_lists
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--survey", required=True)
     ap.add_argument("--out_dir", required=True)
+    ap.add_argument("--torso", default=None, help="torso_survey.py output: zone for the raised retarget")
     args = ap.parse_args()
 
     df = pd.read_parquet(args.survey)
@@ -39,6 +44,14 @@ def main():
     df.loc[pops, "zone"], df.loc[pops, "reason"] = "red", "参考数据跳变"
     lost = ~failed & (df.frac_untracked > 0)
     df.loc[lost, "zone"], df.loc[lost, "reason"] = "red", "参考数据缺帧"
+    torso_cols = []
+    if args.torso:
+        torso = pd.read_parquet(args.torso)
+        torso = torso[torso.error == ""].drop(columns="error")
+        torso_cols = [c for c in torso.columns if c != "rel"]
+        df = df.merge(torso, on="rel", how="left")
+        df["zone"], df["reason"], df["raised"] = assign_raised_zones(df)
+        torso_cols = ["raised", *torso_cols]
 
     cols = [
         "rel", "zone", "reason", "subset", "capture", "person", "session_id", "task", "words", "beta0", "duration_sec",
@@ -46,7 +59,7 @@ def main():
         "hips_z_max", "frac_lift_low", "frac_lift_high", "lift_high_run_s", "frac_floor", "pitch_min", "pitch_max",
         "frac_pitch_back", "frac_pitch_fwd", "base_speed_max", "frac_base_fast", "frac_out_ws", "lift_speed_p95",
         "frac_lift_fast", "hand_z_min", "hand_z_max", "base_path_m", "ref_twist_flips", "ref_hand_flips", "ref_pops",
-        "ref_pop_peak", "error",
+        "ref_pop_peak", *torso_cols, "error",
     ]
     os.makedirs(args.out_dir, exist_ok=True)
     out = df[cols].sort_values(["zone", "reason", "subset", "rel"])

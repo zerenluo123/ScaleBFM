@@ -24,11 +24,14 @@ def smooth_root_height(z, fps, cutoff_hz, max_speed):
     return rate_limit(z, max_speed / fps)
 
 
-def filter_root_height(frames, root_name, fps, cutoff_hz, max_speed):
+def filter_root_height(frames, root_name, fps, cutoff_hz, max_speed, min_height=None):
     """Shift every bone of each frame by the same vertical offset so the root height follows the
-    smoothed curve; the pose and all orientations are unchanged."""
+    smoothed curve; the pose and all orientations are unchanged. With min_height, frames whose root is
+    lower (kneeling, seated) are first raised to it, so the pose above the root is kept and the legs
+    are left below the floor."""
     z = np.array([frame[root_name][0][2] for frame in frames])
-    dz = smooth_root_height(z, fps, cutoff_hz, max_speed) - z
+    target = z if min_height is None else np.maximum(z, min_height)
+    dz = smooth_root_height(target, fps, cutoff_hz, max_speed) - z
     shifted = []
     for frame, d in zip(frames, dz):
         offset = np.array([0.0, 0.0, d])

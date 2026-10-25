@@ -21,7 +21,7 @@ from scipy.spatial.transform import Rotation as R
 
 from scaleretarget.pipeline.dataset import ROOT
 from scaleretarget.pipeline.ref_pops import frame_rotations, reference_pops, table_arm_bones
-from scaleretarget.pipeline.workspace import clip_metrics, longest_run, rotation_offsets
+from scaleretarget.pipeline.workspace import clip_metrics, longest_run, rotation_offsets, torso_metrics
 
 FPS = 30
 HANDS = ("left_wrist", "right_wrist")
@@ -81,13 +81,29 @@ def survey_clip(path):
     return row
 
 
-def run(dataset, paths, out, workers):
-    """Survey paths (files under dataset.bvh_root) into the parquet out. Every worker fits the body shape
-    once when it starts (about a minute)."""
+def torso_clip(path):
+    """workspace.torso_metrics of one clip, for workspace.assign_raised_zones."""
+    dataset = _ctx["dataset"]
+    row = {"rel": os.path.relpath(path, dataset.bvh_root).removesuffix(dataset.suffix)}
+    try:
+        frames, extras = _ctx["loader"]._load_sample(path)
+        pos = lambda b: np.array([f[b][0] for f in frames])
+        rot = lambda b: R.from_quat(np.array([f[b][1] for f in frames]), scalar_first=True)
+        hands_z = np.stack([pos(h)[:, 2] for h in HANDS], 1)
+        row |= torso_metrics(pos(_ctx["hips"]), rot(_ctx["hips"]), rot(_ctx["chest"]), hands_z, extras["fps"], _ctx["offsets"])
+        row["error"] = ""
+    except Exception as e:  # noqa: BLE001
+        row["error"] = repr(e)
+    return row
+
+
+def run(dataset, paths, out, workers, clip=survey_clip):
+    """Survey paths (files under dataset.bvh_root) into the parquet out, one row per clip from clip
+    (survey_clip, or torso_clip). Every worker fits the body shape once when it starts (about a minute)."""
     print(f"{len(paths)} clips in {dataset.bvh_root}")
     t0 = time.time()
     with Pool(workers, initializer=_init, initargs=(dataset,)) as pool:
-        rows = list(pool.imap_unordered(survey_clip, paths, chunksize=4))
+        rows = list(pool.imap_unordered(clip, paths, chunksize=4))
     df = pd.DataFrame(rows).sort_values("rel")
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     df.to_parquet(out)

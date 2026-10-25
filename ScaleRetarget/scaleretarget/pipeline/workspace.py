@@ -6,6 +6,9 @@ red     not usable on g1d: non-upright (by text or a torso flipped over), airbor
 yellow  usable but partly outside the g1d workspace (lift stroke, lean-back, base speed)
 green   inside the workspace on (almost) every frame
 
+assign_raised_zones (opt-in, for a retarget that raises the body to the lowest lift) keeps near-floor
+and seated clips that do not lie on the floor, and sends clips that hold a lean g1d cannot follow to red.
+
 Lift speed is reported but does not decide the zone. Positions are the loader's (Z-up meters, human scale).
 """
 
@@ -49,6 +52,19 @@ TERRAIN_RUN_S = 1.0
 # Deep forward bends stop near 140 deg; flips, cartwheels and handsprings pass through 150-180.
 FLIP_PITCH_DEG = 150.0
 BACK_ARCH_DEG = -45.0
+# Raised clips (assign_raised_zones): a near-floor or seated clip is kept with the whole body raised so the
+# hips stay at or above LIFT_BASE (robot.root_height_filter.min_height), unless it lies on the floor.
+# Frames with the torso over 60 deg from upright pile up at hips 0.10-0.35 m (lying) and 0.35-0.70 m
+# (kneeling, bent over) in Embody3D, with almost none in between.
+PRONE_HIPS_Z = 0.35
+PRONE_DEG = 45.0
+# g1d has no joint to lean back past PITCH_MIN_DEG or to the side at all; a lean held past these for
+# longer than HOLD_S is done on purpose. 5% of the Embody3D green / yellow clips lean back past
+# HELD_BACK_DEG on their worst frame.
+HELD_BACK_DEG = -19.0
+HELD_SIDE_DEG = 25.0
+HOLD_S = 2.0
+RAISED_FROM = ("贴地", "坐跪")
 OUT_WS_REASONS = {
     "frac_lift_low": "升降到底",
     "frac_lift_high": "升降到顶",
@@ -61,6 +77,8 @@ REASON_EN = {
     "升降到底": "lift at bottom", "升降到顶": "lift at top", "后仰超限": "lean-back limit",
     "前俯超限": "lean-forward limit", "底盘超速": "base too fast", "骨架不支持": "unsupported skeleton",
     "参考数据跳变": "reference pops", "坐跪": "seated / kneeling", "参考数据缺帧": "untracked frames",
+    "趴躺伏地": "lying on the floor", "后仰过大": "held lean-back", "侧倾过大": "held side lean",
+    "抬高救回": "raised to the lift",
 }
 
 
@@ -77,6 +95,36 @@ def torso_target_pitch(hips_rot, chest_rot, hips_offset, chest_offset):
     heading = np.column_stack([np.cos(yaw), np.sin(yaw), np.zeros_like(yaw)])
     z = (chest_rot * chest_offset).apply([0.0, 0.0, 1.0])
     return np.degrees(np.arctan2((z * heading).sum(1), z[:, 2]))
+
+
+def torso_target_side_lean(hips_rot, chest_rot, hips_offset, chest_offset):
+    """Side lean (deg) of the torso_link target: angle of its up axis out of the plane of the pelvis_proxy
+    heading and the vertical, whatever the forward bend."""
+    yaw = heading_yaw(hips_rot * hips_offset)
+    left = np.column_stack([-np.sin(yaw), np.cos(yaw), np.zeros_like(yaw)])
+    z = (chest_rot * chest_offset).apply([0.0, 0.0, 1.0])
+    return np.degrees(np.arcsin(np.clip((z * left).sum(1), -1.0, 1.0)))
+
+
+def torso_metrics(hips, hips_rot, chest_rot, hands_z, fps, offsets):
+    """Metrics of assign_raised_zones for one clip (inputs as in clip_metrics): frames lying on the
+    floor, the longest held lean-back and side lean, and the clip_metrics of the motion raised so the
+    hips never go below LIFT_BASE (prefix raised_)."""
+    hz = hips[:, 2]
+    pitch = torso_target_pitch(hips_rot, chest_rot, *offsets)
+    side = torso_target_side_lean(hips_rot, chest_rot, *offsets)
+    raise_m = np.clip(LIFT_BASE - hz, 0.0, None)
+    raised = hips.copy()
+    raised[:, 2] = hz + raise_m
+    m = clip_metrics(raised, hips_rot, chest_rot, hands_z + raise_m[:, None], fps, offsets)
+    return {
+        "prone_frames": int(((hz < PRONE_HIPS_Z) & (np.abs(pitch) > PRONE_DEG)).sum()),
+        "back_hold_s": longest_run(pitch < HELD_BACK_DEG) / fps,
+        "side_hold_s": longest_run(np.abs(side) > HELD_SIDE_DEG) / fps,
+        "raise_max": float(raise_m.max()),
+        "frac_raised": frac(raise_m > 0),
+        **{f"raised_{k}": m[k] for k in ("frac_out_ws", *OUT_WS_REASONS)},
+    }
 
 
 def frac(mask):
@@ -158,6 +206,30 @@ def assign_zones(df, upright_text, terrain_text, jump_text=None, seated_text=Non
     upright |= (df.pitch_max > FLIP_PITCH_DEG) | (df.pitch_min < BACK_ARCH_DEG)
     zone[upright], reason[upright] = "red", "非直立"
     return zone, reason
+
+
+def assign_raised_zones(df):
+    """(zone, reason, raised) per row of assign_zones' zone and reason plus torso_metrics columns, for a
+    retarget with robot.root_height_filter.min_height = LIFT_BASE. Every kept clip is zoned by its raised
+    motion; near-floor and seated clips are kept too (raised) unless they lie on the floor; any kept clip
+    that holds a side lean or a lean-back g1d cannot follow goes red. Rows without torso_metrics are left
+    as they are."""
+    zone, reason = df.zone.copy(), df.reason.copy()
+    measured = df.prone_frames.notna()
+    raised = measured & (zone == "red") & reason.isin(RAISED_FROM)
+    kept = raised | (measured & zone.isin(["green", "yellow"]))
+    out_ws = df.raised_frac_out_ws > OUT_WS_FRAC
+    worst = df[[f"raised_{k}" for k in OUT_WS_REASONS]].fillna(0).idxmax(axis=1).str.removeprefix("raised_")
+    zone[kept] = np.where(out_ws[kept], "yellow", "green")
+    reason[kept] = np.where(out_ws[kept], worst[kept].map(OUT_WS_REASONS), np.where(raised[kept], "抬高救回", ""))
+    rules = [
+        ("侧倾过大", kept & (df.side_hold_s > HOLD_S)),
+        ("后仰过大", kept & (df.back_hold_s > HOLD_S)),
+        ("趴躺伏地", raised & (df.prone_frames > 0)),
+    ]
+    for name, mask in rules:
+        zone[mask], reason[mask] = "red", name
+    return zone, reason, raised & (zone != "red")
 
 
 def write_lists(zones, rel_paths, out_dir):

@@ -201,6 +201,7 @@ class GmrRetargeter(BaseRetargeter):
                 self.motion_fps,
                 self.root_height_filter.cutoff_hz,
                 self.root_height_filter.max_speed,
+                self.root_height_filter.get("min_height", None),
             )
         if self.base_path_filter is not None:
             frames = filter_base_path(
