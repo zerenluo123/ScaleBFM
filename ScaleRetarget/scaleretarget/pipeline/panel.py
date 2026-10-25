@@ -163,6 +163,7 @@ class Browser(QMainWindow):
         self.version = None
         self.scan_result = None
         self.scanning = False
+        self.ood_log = (None, None)
         self.history = []
         self.zone = "green"
         # Bumped by every OOD move, so a scan that started before it does not undo it on screen.
@@ -216,8 +217,8 @@ class Browser(QMainWindow):
         bar.addWidget(self.compare_box)
         return bar
 
-    def refresh_versions(self):
-        versions = list_versions(self.root)
+    def refresh_versions(self, versions=None):
+        versions = list_versions(self.root) if versions is None else versions
         for box in (self.version_box, self.compare_box):
             current = box.currentText()
             if [box.itemText(i) for i in range(box.count())] != versions:
@@ -381,18 +382,26 @@ class Browser(QMainWindow):
 
         def work():
             try:
-                result = (counter.scan(), ood_counter.scan(), read_ood_log(self.version_dir(version)))
-                self.scan_result = (version, moves, result)
+                result = (counter.scan(), ood_counter.scan(), self.read_ood_log(version))
+                self.scan_result = (version, moves, result, list_versions(self.root))
             finally:
                 self.scanning = False
 
         threading.Thread(target=work, daemon=True).start()
 
+    def read_ood_log(self, version):
+        """The version's OOD log, reread only when it changed."""
+        path = os.path.join(self.version_dir(version), OOD_DIR, "ood.csv")
+        key = (version, os.path.getmtime(path) if os.path.isfile(path) else None)
+        if self.ood_log[0] != key:
+            self.ood_log = (key, read_ood_log(self.version_dir(version)))
+        return self.ood_log[1]
+
     def poll_scan(self):
+        # No file access here: on a network mount it would freeze the window until the mount answers.
         if self.scan_result is None:
             return
-        (version, moves, result), self.scan_result = self.scan_result, None
-        versions = list_versions(self.root)
+        (version, moves, result, versions), self.scan_result = self.scan_result, None
         if self.version not in versions and versions:  # its folder was deleted
             self.set_version(versions[-1])
         elif version == self.version and moves == self.moves:
@@ -401,7 +410,7 @@ class Browser(QMainWindow):
         else:
             # Finished a scan of the previous version, or one from before an OOD move; scan again now.
             self.start_scan()
-        self.refresh_versions()
+        self.refresh_versions(versions)
 
     def apply_scan(self, entries, ood_entries, ood_log):
         df = self.df
@@ -460,8 +469,8 @@ class Browser(QMainWindow):
         remaining = int(df.frames_expected[target].sum() - df.frames_done[target].sum())
         t0, f0 = self.history[0]
         refresh = f"每 {REFRESH_MS // 1000} 秒自动刷新"
-        if self.args.cache_only and os.path.isfile(self.counter.cache_path):
-            stamp = time.strftime("%H:%M:%S", time.localtime(os.path.getmtime(self.counter.cache_path)))
+        if self.args.cache_only and self.counter.cache_mtime is not None:
+            stamp = time.strftime("%H:%M:%S", time.localtime(self.counter.cache_mtime))
             refresh += f"（读缓存，缓存最后更新 {stamp}）"
         if now - t0 > 1 and done > f0:
             rate = (done - f0) / (now - t0)
@@ -619,9 +628,9 @@ class Browser(QMainWindow):
             cmd += ["--override", *overrides]
         return cmd + (["--spikes", spikes, "--spike_label", f"arm joint speed {label}"] if spikes else [])
 
-    def warn_not_converted(self, row, version):
+    def warn_not_converted(self, row, version, red_note="只能单独播放参考动作"):
         if row.zone == "red":
-            QMessageBox.warning(self, "红区不转换", f"{row.filename} 在红区，批量 retarget 不转换，只能单独播放参考动作。")
+            QMessageBox.warning(self, "红区不转换", f"{row.filename} 在红区，批量 retarget 不转换，{red_note}。")
             return
         QMessageBox.warning(
             self, "还没转换",
@@ -654,21 +663,26 @@ class Browser(QMainWindow):
         return self.player_cmd(row, "unitree_g1", f"[official G1] {row.filename}") + ["--official_csv", csv]
 
     def compare_reference(self):
-        """The selected version's retarget and the standard G1 retarget, in two windows."""
+        """The selected version's retarget and the standard G1 retarget, in two windows. A red clip has no
+        retarget of ours, so only the standard G1 one opens, to check its zone on a robot with legs."""
         row = self.selected_row()
         if row is None:
             return
         ours = self.version_cmd(row, self.version)
-        if ours is None:
+        if ours is None and row.zone != "red":
             return self.warn_not_converted(row, self.version)
         reference = self.reference_cmd(row)
         if reference is None:
             return
         self.stop_player()
-        self.launch(ours)
+        if ours is not None:
+            self.launch(ours)
         self.launch(reference)
         wait = "（标准 G1 现场转换，要等几十秒）" if self.dataset.official_csv_root is None else ""
-        self.statusBar().showMessage(f"正在打开 {row.filename}：{self.version} + {self.reference}{wait} ...", 8000)
+        shown = f"{self.version} + {self.reference}" if ours is not None else f"只有{self.reference}"
+        self.statusBar().showMessage(f"正在打开 {row.filename}：{shown}{wait} ...", 8000)
+        if ours is None:
+            self.warn_not_converted(row, self.version, f"g1d 没有结果，只打开{self.reference}")
 
     def compare_versions(self):
         """The same clip from the selected version and the comparison version, in two windows."""

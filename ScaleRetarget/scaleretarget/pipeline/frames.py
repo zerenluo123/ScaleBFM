@@ -73,7 +73,8 @@ class FrameCounter:
         self.entries = self.read_cache()
 
     def read_cache(self):
-        if not os.path.isfile(self.cache_path):
+        self.cache_mtime = os.path.getmtime(self.cache_path) if os.path.isfile(self.cache_path) else None
+        if self.cache_mtime is None:
             return {}
         # round_trip: the default parser can miss the last digit of the mtime, which marks the pkl as rewritten.
         cache = pd.read_csv(self.cache_path, keep_default_na=False, float_precision="round_trip")
@@ -84,7 +85,10 @@ class FrameCounter:
 
     def scan(self, pool=None):
         if self.cache_only:
-            self.entries = self.read_cache()
+            # Over a slow mount a reread takes long and holds up every other file access of the panel.
+            mtime = os.path.getmtime(self.cache_path) if os.path.isfile(self.cache_path) else None
+            if mtime != self.cache_mtime:
+                self.entries = self.read_cache()
             return dict(self.entries)
         found, todo = {}, []
         if os.path.isdir(self.retarget_dir):

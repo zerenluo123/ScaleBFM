@@ -237,6 +237,7 @@ LAFAN=$R/lafan1 LAFAN_OUT=$R/lafan1_retarget python scripts/lafan/browse.py --ve
 GRAB_OUT=$R/grab_retarget python scripts/grab/browse.py --version v1 --cache_only
 OMOMO_OUT=$R/omomo_retarget python scripts/omomo/browse.py --version v1 --cache_only
 AMASS_OUT=$R/amass_retarget python scripts/amass/browse.py --version v1 --cache_only
+EMBODY3D=$R/embody3d EMBODY3D_OUT=$R/embody3d_retarget python scripts/embody3d/browse.py --version v1 --cache_only
 fusermount -u ~/mnt/hkeai         # 不用了卸载
 ```
 
