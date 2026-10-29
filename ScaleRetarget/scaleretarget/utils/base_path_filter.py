@@ -35,15 +35,26 @@ def plan_base_path(xy, pelvis_yaw, fps, cutoff_hz, max_speed, max_turn_rate=None
     return path, heading
 
 
-def filter_base_path(frames, root_name, root_rot_offset, fps, cutoff_hz, max_speed, max_turn_rate=None):
+def filter_base_path(frames, root_name, root_rot_offset, fps, cutoff_hz, max_speed, max_turn_rate=None,
+                     root_offset=(0.0, 0.0)):
     """Move the whole human so the root follows the chassis path and heading: every bone is shifted
     horizontally by the path offset and turned about the vertical through the root by the heading
-    offset, the same way the root height filter shifts every bone vertically."""
+    offset, the same way the root height filter shifts every bone vertically.
+
+    root_offset is where the robot's root target sits in the chassis frame (x forward, y left). The
+    path is planned for the chassis origin, the point a differential drive cannot move sideways, and
+    the root is put root_offset ahead of it. Returns the moved frames and the (n, 3) chassis x, y, yaw.
+    """
     xy = np.array([frame[root_name][0][:2] for frame in frames])
     root_rot = R.from_quat(np.array([frame[root_name][1] for frame in frames]), scalar_first=True)
     pelvis_yaw = heading_yaw(root_rot * root_rot_offset)
-    path, heading = plan_base_path(xy, pelvis_yaw, fps, cutoff_hz, max_speed, max_turn_rate)
-    pivot = np.column_stack([path, np.zeros(len(path))])
+    off = np.asarray(root_offset, dtype=np.float64)
+
+    def ahead(yaw):
+        return np.column_stack([np.cos(yaw) * off[0] - np.sin(yaw) * off[1], np.sin(yaw) * off[0] + np.cos(yaw) * off[1]])
+
+    path, heading = plan_base_path(xy - ahead(pelvis_yaw), pelvis_yaw, fps, cutoff_hz, max_speed, max_turn_rate)
+    pivot = np.column_stack([path + ahead(heading), np.zeros(len(path))])
     shift = pivot - np.column_stack([xy, np.zeros(len(xy))])
     turn = R.from_rotvec(np.outer(heading - np.unwrap(pelvis_yaw), [0.0, 0.0, 1.0]))
     moved = {}
@@ -51,4 +62,5 @@ def filter_base_path(frames, root_name, root_rot_offset, fps, cutoff_hz, max_spe
         pos = np.array([frame[bone][0] for frame in frames], dtype=np.float64)
         rot = R.from_quat(np.array([frame[bone][1] for frame in frames]), scalar_first=True)
         moved[bone] = (pivot + turn.apply(pos + shift - pivot), (turn * rot).as_quat(scalar_first=True))
-    return [{bone: (pos[i], quat[i]) for bone, (pos, quat) in moved.items()} for i in range(len(frames))]
+    moved_frames = [{bone: (pos[i], quat[i]) for bone, (pos, quat) in moved.items()} for i in range(len(frames))]
+    return moved_frames, np.column_stack([path, heading])

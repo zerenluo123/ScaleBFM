@@ -11,6 +11,7 @@ from scaleretarget.utils.robot_base import RobotBase
 from scaleretarget.utils.root_height_filter import filter_root_height
 from scaleretarget.utils.base_path_filter import filter_base_path
 from scaleretarget.utils.frame_step_limit import FrameStepLimit
+from scaleretarget.utils.dof_lock import DofLock
 from scaleretarget.utils.joint_comfort_task import JointComfortTask
 from scaleretarget.utils.frame_smooth_task import FrameSmoothTask
 
@@ -104,8 +105,20 @@ class GmrRetargeter(BaseRetargeter):
             logger.info(f"[Retargeter] Root height filter: {dict(self.root_height_filter)}")
 
         self.base_path_filter = self.config.robot.get("base_path_filter", None)
+        self.chassis_plan = None
+        self.chassis_lock = None
         if self.base_path_filter is not None:
             logger.info(f"[Retargeter] Base path filter: {dict(self.base_path_filter)}")
+            assert self.base.type == "planar", "base_path_filter plans a wheeled chassis (planar base)"
+            # Where the root target sits in the chassis frame; the path is planned for the chassis origin.
+            data = mj.MjData(self.model)
+            mj.mj_kinematics(self.model, data)
+            chassis = int(self.model.jnt_bodyid[0])
+            rel = data.xmat[chassis].reshape(3, 3).T @ (data.xpos[self.robot_body_names[self.robot_root_name]] - data.xpos[chassis])
+            self.chassis_root_offset = rel[:2]
+            logger.info(f"[Retargeter] Root target offset in the chassis frame: {self.chassis_root_offset}")
+            # The planned chassis pose is written into the configuration each frame; the IK keeps it.
+            self.chassis_lock = DofLock(self.model, [self.model.joint(j).name for j in range(3)])
 
         self.speed_limits = {key: self.config.robot[key] for key in ("lift_speed_limit", "turn_speed_limit")
                              if self.config.robot.get(key, None) is not None}
@@ -204,7 +217,7 @@ class GmrRetargeter(BaseRetargeter):
                 self.root_height_filter.get("min_height", None),
             )
         if self.base_path_filter is not None:
-            frames = filter_base_path(
+            frames, self.chassis_plan = filter_base_path(
                 frames,
                 self.human_root_name,
                 self.rot_offsets[self.human_root_name],
@@ -212,6 +225,7 @@ class GmrRetargeter(BaseRetargeter):
                 self.base_path_filter.cutoff_hz,
                 self.base_path_filter.max_speed,
                 self.base_path_filter.get("max_turn_rate", None),
+                root_offset=self.chassis_root_offset,
             )
         self.init_frame_height = frames[0][self.human_root_name][0][2]
         return frames
@@ -241,14 +255,22 @@ class GmrRetargeter(BaseRetargeter):
             init_human_data[self.human_root_name][0],
             init_human_data[self.human_root_name][1],
         )
+        if self.chassis_plan is not None:
+            init_qpos[:3] = self.chassis_plan[0]
         self.configuration.update(q=init_qpos)
 
         self.step_limits = [FrameStepLimit(self.model, list(limit.joints), limit.max_speed / self.motion_fps)
                             for limit in self.speed_limits.values()]
         ik_limits = [*self.ik_limits, *self.step_limits]
+        if self.chassis_plan is not None:
+            ik_limits.append(self.chassis_lock)
 
         for frame_idx in track(range(len(frames)), total=len(frames), disable=not self.show_progress):
             frame = frames[frame_idx]
+            if self.chassis_plan is not None:
+                q = self.configuration.q.copy()
+                q[:3] = self.chassis_plan[frame_idx]
+                self.configuration.update(q=q)
             for step_limit in self.step_limits:
                 # The first frame converges from the initial guess, so it is left unconstrained.
                 step_limit.set_anchor(self.configuration.q if frame_idx > 0 else None)

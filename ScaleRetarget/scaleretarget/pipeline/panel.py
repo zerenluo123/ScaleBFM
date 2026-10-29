@@ -685,7 +685,8 @@ class Browser(QMainWindow):
             self.warn_not_converted(row, self.version, f"g1d 没有结果，只打开{self.reference}")
 
     def compare_versions(self):
-        """The same clip from the selected version and the comparison version, in two windows."""
+        """The same clip from the selected version and the comparison version, in two windows. A wheeled
+        chassis also shows its forward / sideways velocity as arrows, so sideways sliding is easy to spot."""
         row = self.selected_row()
         if row is None:
             return
@@ -698,7 +699,7 @@ class Browser(QMainWindow):
             cmd = self.version_cmd(row, version)
             if cmd is None:
                 return self.warn_not_converted(row, version)
-            cmds.append(cmd)
+            cmds.append(cmd + ["--chassis_vel"])
         self.stop_player()
         for cmd in cmds:
             self.launch(cmd)

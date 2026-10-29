@@ -18,6 +18,10 @@ one second before the first one.
 --live retargets the source on the spot with the current config instead of reading a pkl, and marks
 its own arm-joint jumps (> 20 rad/s after frame 5), e.g. to compare an IK change with an older pkl.
 --official_csv without --spikes marks the official retarget's own jumps the same way.
+
+--chassis_vel draws, for a wheeled (planar) base, the chassis velocity in its own frame as two arrows
+from above the chassis centre, 1 m of arrow per 1 m/s: green forward, red sideways. A
+differential drive cannot move sideways, so any red arrow is motion the real chassis cannot follow.
 """
 
 import argparse
@@ -42,6 +46,19 @@ from scaleretarget.viewer.robot_motion_viewer import RobotMotionViewer
 CONFIG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "config")
 KEY_RIGHT, KEY_LEFT, KEY_UP = 262, 263, 265
 MAX_SPIKES_SHOWN = 6
+# Chassis velocity arrows: drawn just above the g1d chassis top (0.20 m), 1 m long per 1 m/s.
+VEL_ARROW_Z, VEL_ARROW_SCALE, VEL_ARROW_WIDTH = 0.22, 1.0, 0.025
+FORWARD_RGBA, SIDEWAYS_RGBA = (0.1, 0.75, 0.2, 1.0), (0.9, 0.1, 0.1, 1.0)
+
+
+def chassis_velocity(root_pos, root_rot, fps):
+    """(n,) yaw and (n, 2) forward and sideways speed of a planar chassis in its own frame (root_rot wxyz, pure yaw)."""
+    pos = np.asarray(root_pos, dtype=np.float64)[:, :2]
+    quat = np.asarray(root_rot, dtype=np.float64)
+    yaw = np.unwrap(2.0 * np.arctan2(quat[:, 3], quat[:, 0]))
+    vel = np.gradient(pos, 1.0 / fps, axis=0) if len(pos) > 1 else np.zeros_like(pos)
+    c, s = np.cos(yaw), np.sin(yaw)
+    return yaw, np.column_stack([vel[:, 0] * c + vel[:, 1] * s, -vel[:, 0] * s + vel[:, 1] * c])
 
 
 def load_config(robot, loader, overrides=(), snapshot=None):
@@ -94,6 +111,7 @@ def main():
     ap.add_argument("--spike_label", default="spikes")
     ap.add_argument("--override", nargs="*", default=[], help="hydra overrides the pkl was retargeted with")
     ap.add_argument("--config_snapshot", default=None, help="version folder whose saved config the pkl was retargeted with")
+    ap.add_argument("--chassis_vel", action="store_true", help="draw a wheeled chassis' forward / sideways velocity as arrows")
     args = ap.parse_args()
     logger.remove()
     logger.add(sys.stderr, level="WARNING")
@@ -167,6 +185,10 @@ def main():
     viewer.update(fps=extras["fps"])
     robot_geoms = viewer.model.geom_bodyid != 0
     robot_alpha = viewer.model.geom_rgba[robot_geoms, 3].copy()
+    chassis = None
+    if args.chassis_vel and viewer.base.type == "planar" and mode != "reference only":
+        chassis = chassis_velocity(root_pos[:num_frames], root_rot[:num_frames], extras["fps"])
+        sideways_max = float(np.abs(chassis[1][:, 1]).max())
     if mode == "reference only":
         # Keep the floor (world body) and hide the robot; it only carries the camera along the root target.
         viewer.model.geom_rgba[robot_geoms, 3] = 0.0
@@ -191,13 +213,25 @@ def main():
             shown = ", ".join(spike_ranges[:MAX_SPIKES_SHOWN])
             more = f" (+{len(spike_ranges) - MAX_SPIKES_SHOWN} more)" if len(spike_ranges) > MAX_SPIKES_SHOWN else ""
             status += f"\n{args.spike_label} at frames {shown}{more}"
+        arrows = []
+        if chassis is not None:
+            yaw, (forward, sideways) = chassis[0][i], chassis[1][i]
+            start = np.array([root_pos[i][0], root_pos[i][1], VEL_ARROW_Z])
+            heading = np.array([np.cos(yaw), np.sin(yaw), 0.0])
+            left = np.array([-np.sin(yaw), np.cos(yaw), 0.0])
+            for speed, axis, rgba in ((forward, heading, FORWARD_RGBA), (sideways, left, SIDEWAYS_RGBA)):
+                if abs(speed) * VEL_ARROW_SCALE > 1e-3:
+                    arrows.append((start, start + VEL_ARROW_SCALE * speed * axis, rgba, VEL_ARROW_WIDTH))
+            status += (f"\nchassis forward {forward:+.2f} m/s (green), sideways {sideways:+.2f} m/s (red)"
+                       f"   clip max sideways {sideways_max:.2f} m/s   arrow 1 m = 1 m/s")
         viewer.viewer.set_texts([
             (mj.mjtFontScale.mjFONTSCALE_150, mj.mjtGridPos.mjGRID_TOPLEFT, title + ("\n" if spike_ranges else ""),
              status),
             (mj.mjtFontScale.mjFONTSCALE_100, mj.mjtGridPos.mjGRID_BOTTOMLEFT,
              "\n".join(k for k, _ in keys), "\n".join(v for _, v in keys)),
         ])
-        viewer.step(root_pos=root_pos[i], root_rot=root_rot[i], dof_pos=dof_pos[i], human_motion_data=targets[i])
+        viewer.step(root_pos=root_pos[i], root_rot=root_rot[i], dof_pos=dof_pos[i], human_motion_data=targets[i],
+                    arrows=arrows)
         if state["paused"]:
             time.sleep(0.02)
         else:

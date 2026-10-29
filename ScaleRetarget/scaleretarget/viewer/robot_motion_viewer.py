@@ -111,8 +111,10 @@ class RobotMotionViewer:
             show_human_body_name=False,
             # scale for human point visualization
             human_point_scale=0.1,
-            # human pos offset add for visualization    
+            # human pos offset add for visualization
             human_pos_offset=np.array([0.0, 0.0, 0]),
+            # extra arrows to draw, each (from, to, rgba, width)
+            arrows=(),
         ):
         """
         by default visualize robot motion.
@@ -134,9 +136,17 @@ class RobotMotionViewer:
             self.viewer.cam.elevation = -10  # face, slightly down upon
             # self.viewer.cam.azimuth = 180    # face forward
         
-        if human_motion_data is not None:
+        if human_motion_data is not None or arrows:
             # Clean custom geometry
             self.viewer.user_scn.ngeom = 0
+        for start, end, rgba, width in arrows:
+            geom = self.viewer.user_scn.geoms[self.viewer.user_scn.ngeom]
+            mj.mjv_initGeom(geom, type=mj.mjtGeom.mjGEOM_ARROW, size=np.zeros(3), pos=np.zeros(3),
+                            mat=np.eye(3).flatten(), rgba=np.asarray(rgba, dtype=np.float32))
+            mj.mjv_connector(geom, type=mj.mjtGeom.mjGEOM_ARROW, width=width,
+                             from_=np.asarray(start, dtype=np.float64), to=np.asarray(end, dtype=np.float64))
+            self.viewer.user_scn.ngeom += 1
+        if human_motion_data is not None:
             # Draw the task targets for reference
             for human_body_name, (pos, rot) in human_motion_data.items():
                 draw_frame(
