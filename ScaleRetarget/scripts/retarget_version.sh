@@ -17,6 +17,8 @@
 # (vN/ood/bvh/...) count as converted and are never converted again. Extra hydra overrides are passed
 # through and recorded in run.json, e.g.
 #   VERSION=v3 NOTE="arm jump fix" NUM_WORKERS=64 scripts/<dataset>/retarget.sh
+# A re-run keeps the OOD decisions of the previous version: scripts/version_report.py --carry_ood (before
+# or after the run), and the run ends with <version>/version_report.md comparing it with the previous one.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -132,6 +134,14 @@ LOGURU_LEVEL=${LOGURU_LEVEL:-INFO} python retarget.py "+robot=$ROBOT" "+loader=$
   loader.config.target_fps=$TARGET_FPS \
   "++loader.config.done_dirs=[$RUN_DIR/ood]" \
   "output_dir=$RUN_DIR" "$@"
+# Where every clip sits per zone, against the previous version (scripts/version_report.py): a re-run should
+# end with the same counts once the previous OOD is carried over (--carry_ood).
+PREV=$(find "$OUT" -mindepth 2 -maxdepth 2 -path "$OUT/v*/run.json" -printf '%h\n' 2>/dev/null | sed 's|.*/v||' \
+  | grep -E '^[0-9]+$' | sort -n | awk -v cur="${VERSION#v}" '$1 < cur' | tail -1 || true)
+if [[ -n "$PREV" ]]; then
+  python scripts/version_report.py "$KEY" --src "v$PREV" --dst "$VERSION" \
+    || echo "[report] v$PREV and $VERSION differ; carry the OOD over with: python scripts/version_report.py $KEY --src v$PREV --dst $VERSION --carry_ood --apply"
+fi
 if [[ -n "${CACHE_PID:-}" ]]; then
   echo "[retarget] finished; updating the frame cache one last time"
 else
